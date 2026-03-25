@@ -7,6 +7,9 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(_HE
 DB_PATH = os.getenv("DB_PATH") or os.path.join(_REPO_ROOT, "data", "erp.db")
 
 
+os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+
+
 @contextmanager
 def get_connection() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH)
