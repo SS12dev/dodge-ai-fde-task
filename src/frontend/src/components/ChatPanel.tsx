@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import type { FormEvent } from 'react';
 import { runQuestion } from '../lib/api';
 import type { QueryResponse } from '../lib/types';
 
@@ -14,7 +13,7 @@ export function ChatPanel() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<QueryResponse | null>(null);
 
-  const onSubmit = async (event: FormEvent) => {
+  const onSubmit = async (event: { preventDefault: () => void }) => {
     event.preventDefault();
     if (!question.trim()) {
       return;
@@ -26,6 +25,22 @@ export function ChatPanel() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const rows = result?.rows ?? [];
+  const tableColumns = rows.length > 0 ? Object.keys(rows[0]) : [];
+
+  const toCellText = (value: unknown): string => {
+    if (value === null || value === undefined) {
+      return '';
+    }
+    if (typeof value === 'object') {
+      return JSON.stringify(value);
+    }
+    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') {
+      return `${value}`;
+    }
+    return JSON.stringify(value);
   };
 
   return (
@@ -51,7 +66,13 @@ export function ChatPanel() {
       </div>
       {result ? (
         <div className="result">
-          {!result.ok ? <p className="error">{result.error}</p> : <p>{result.answer}</p>}
+          {result.ok ? <p>{result.answer}</p> : <p className="error">{result.error}</p>}
+          {result.generation_source ? (
+            <p className="query-meta">
+              Mode: <strong>{result.generation_source}</strong>
+              {result.model_name ? ` (${result.model_name})` : ''}
+            </p>
+          ) : null}
           {result.sql ? (
             <>
               <h3>Generated SQL</h3>
@@ -59,7 +80,34 @@ export function ChatPanel() {
             </>
           ) : null}
           <h3>Rows</h3>
-          <pre>{JSON.stringify(result.rows.slice(0, 20), null, 2)}</pre>
+          {rows.length === 0 ? (
+            <p>No rows returned.</p>
+          ) : (
+            <div className="rows-table-wrap">
+              <table className="rows-table">
+                <thead>
+                  <tr>
+                    {tableColumns.map((col) => (
+                      <th key={col}>{col}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.slice(0, 20).map((row) => {
+                    const rowKey = JSON.stringify(row);
+                    return (
+                    <tr key={rowKey}>
+                      {tableColumns.map((col) => (
+                        <td key={`${rowKey}-${col}`}>{toCellText(row[col])}</td>
+                      ))}
+                    </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              {rows.length > 20 ? <p>Showing first 20 rows of {rows.length}.</p> : null}
+            </div>
+          )}
         </div>
       ) : null}
     </section>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChatPanel } from './components/ChatPanel';
 import { GraphView } from './components/GraphView';
 import { fetchGraph, ingestData } from './lib/api';
@@ -8,16 +8,30 @@ import './App.css';
 function App() {
   const [graph, setGraph] = useState<GraphData>({ nodes: [], edges: [] });
   const [status, setStatus] = useState<string>('Loading graph...');
+  const bootstrapped = useRef(false);
 
   useEffect(() => {
+    if (bootstrapped.current) {
+      return;
+    }
+    bootstrapped.current = true;
+
     const bootstrap = async () => {
+      let ingestWarning = false;
       try {
         await ingestData();
+      } catch (err) {
+        ingestWarning = true;
+        console.warn('Dataset ingest on startup failed; attempting to load existing graph.', err);
+      }
+
+      try {
         const nextGraph = await fetchGraph();
         setGraph(nextGraph);
-        setStatus(`Loaded ${nextGraph.nodes.length} nodes and ${nextGraph.edges.length} edges`);
+        const prefix = ingestWarning ? 'Loaded existing graph after ingest warning.' : 'Loaded';
+        setStatus(`${prefix} ${nextGraph.nodes.length} nodes and ${nextGraph.edges.length} edges`);
       } catch (err) {
-        setStatus('Graph load failed. Make sure backend is running and data CSVs are in /data.');
+        setStatus('Graph load failed. Make sure backend is running and dataset files are available in /data.');
         console.error(err);
       }
     };

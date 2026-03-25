@@ -2,6 +2,7 @@ export type GraphNode = {
   id: string;
   table: string;
   label: string;
+  colour?: string;
   data: Record<string, unknown>;
 };
 
@@ -23,4 +24,6 @@ export type QueryResponse = {
   answer?: string;
   sql: string;
   rows: Record<string, unknown>[];
+  generation_source?: string;
+  model_name?: string | null;
 };
