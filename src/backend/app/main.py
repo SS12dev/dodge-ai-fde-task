@@ -22,9 +22,15 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Dodge AI FDE Task API", version="0.1.0")
 
+
+def parse_cors_origins() -> list[str]:
+    raw = os.getenv("CORS_ORIGINS", "http://localhost:5173")
+    origins = [origin.strip() for origin in raw.split(",") if origin.strip()]
+    return origins or ["http://localhost:5173"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.getenv("CORS_ORIGINS", "http://localhost:5173").split(","),
+    allow_origins=parse_cors_origins(),
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )

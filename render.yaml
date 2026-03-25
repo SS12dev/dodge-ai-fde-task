@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: dodge-ai-backend
+    runtime: python
+    rootDir: src/backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-1.5-flash
+      - key: DATA_DIR
+        value: /opt/render/project/src/data
+      - key: CORS_ORIGINS
+        value: https://dodge-ai-frontend.onrender.com
+
+  - type: web
+    name: dodge-ai-frontend
+    runtime: static
+    rootDir: src/frontend
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    envVars:
+      - key: VITE_API_BASE_URL
+        value: https://dodge-ai-backend.onrender.com

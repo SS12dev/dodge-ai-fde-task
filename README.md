@@ -269,10 +269,61 @@ Refinement cycle:
 
 ---
 
-## Deployment (Railway)
+## Deployment & Publishing
 
-1. Push repo to GitHub (public).
-2. Create a new Railway project → **Deploy from GitHub repo**.
-3. Add a service for the backend: set **Root Directory** to `src/backend`, **Start Command** to `python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT`.
-4. Add env vars: `GEMINI_API_KEY`, `CORS_ORIGINS=<frontend URL>`.
-5. Add a static/Vite service for the frontend pointing to `src/frontend` with build command `npm run build` and output `dist/`.
+This repo is now deployment-ready with both:
+
+1. **Render blueprint** via `render.yaml` (recommended for fastest public demo)
+2. **Dockerfiles** for backend and frontend for other platforms
+
+### Option A: Render Blueprint (Recommended)
+
+1. Push the repo to GitHub.
+2. In Render, click **New > Blueprint** and select this repository.
+3. Render reads `render.yaml` and creates:
+  - `dodge-ai-backend` (FastAPI)
+  - `dodge-ai-frontend` (static Vite build)
+4. In backend service settings, set:
+  - `GEMINI_API_KEY` to your real API key
+  - `CORS_ORIGINS` to your frontend URL after first deploy
+5. In frontend service settings, ensure `VITE_API_BASE_URL` points to backend URL.
+6. Redeploy both services.
+
+Expected runtime behavior:
+
+1. Backend health endpoint: `/api/health` returns `status=ok`
+2. Frontend loads and can call `/api/graph` and `/api/chat/query`
+3. Generated SQL and rows are visible in the UI
+
+### Option B: Split Hosting (Frontend + Backend)
+
+Frontend can be hosted on Vercel/Netlify and backend on Render/Railway/Fly.
+
+1. Deploy backend from `src/backend` with start command:
+  - `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+2. Set backend env vars:
+  - `GEMINI_API_KEY`
+  - `GEMINI_MODEL` (optional)
+  - `DATA_DIR=/path/to/data` (or keep default if dataset is in repo)
+  - `CORS_ORIGINS=https://<your-frontend-domain>`
+3. Deploy frontend from `src/frontend` with:
+  - build: `npm ci && npm run build`
+  - output: `dist`
+4. Set frontend env var:
+  - `VITE_API_BASE_URL=https://<your-backend-domain>`
+
+### Docker Support
+
+For container platforms, use:
+
+1. `src/backend/Dockerfile`
+2. `src/frontend/Dockerfile`
+
+### Pre-Publish Checklist
+
+Before sharing the public demo URL:
+
+1. Run the smoke test against deployed backend endpoints.
+2. Verify the required assignment queries in `docs/prompt-test-suite.md`.
+3. Verify guardrail prompts are rejected correctly.
+4. Ensure UI shows generated SQL and does not crash on graph interactions.
