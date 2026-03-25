@@ -1,149 +1,255 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import cytoscape from 'cytoscape';
 import type { GraphData, GraphNode } from '../lib/types';
+import { type HoveredNode, type LegendItem, useGraphInteractions } from './useGraphInteractions';
 
 type GraphViewProps = {
   graph: GraphData;
+  queryMatchedNodeIds?: string[];
 };
 
-export function GraphView({ graph }: Readonly<GraphViewProps>) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const cyRef = useRef<cytoscape.Core | null>(null);
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+type QueryEvidenceNoticeProps = {
+  count: number;
+  isActive: boolean;
+  onToggle: () => void;
+};
 
-  const nodeById = useMemo(
-    () => new Map(graph.nodes.map((node) => [node.id, node])),
-    [graph.nodes],
+type LegendPanelProps = {
+  items: LegendItem[];
+  activeTable: string | null;
+  onToggle: (table: string) => void;
+};
+
+type GraphToolbarProps = {
+  hasSelection: boolean;
+  isExpanded: boolean;
+  onFocus: () => void;
+  onReset: () => void;
+  onToggleExpand: () => void;
+  onZoomOut: () => void;
+  onZoomIn: () => void;
+};
+
+type HoverCardProps = {
+  hoveredNode: HoveredNode;
+};
+
+type NodeDetailCardProps = {
+  selectedNode: GraphNode | null;
+  onClear: () => void;
+};
+
+function formatMetadataValue(value: unknown): string {
+  if (value === null || value === undefined) {
+    return '';
+  }
+  if (typeof value === 'object') {
+    return JSON.stringify(value);
+  }
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') {
+    return `${value}`;
+  }
+  return JSON.stringify(value);
+}
+
+function QueryEvidenceNotice({ count, isActive, onToggle }: Readonly<QueryEvidenceNoticeProps>) {
+  if (count === 0) {
+    return null;
+  }
+
+  return (
+    <p className="query-evidence-note">
+      Query evidence: highlighting {count} matched node{count === 1 ? '' : 's'} from the latest result set.
+      <button type="button" className="query-evidence-toggle" onClick={onToggle}>
+        {isActive ? 'Hide' : 'Show'}
+      </button>
+    </p>
   );
-  const selectedNode: GraphNode | null = selectedNodeId ? (nodeById.get(selectedNodeId) ?? null) : null;
+}
 
-  useEffect(() => {
-    if (!containerRef.current) {
-      return;
-    }
+function LegendPanel({ items, activeTable, onToggle }: Readonly<LegendPanelProps>) {
+  if (items.length === 0) {
+    return null;
+  }
 
-    const cy = cytoscape({
-      container: containerRef.current,
-      elements: [
-        ...graph.nodes.map((n) => ({
-          data: { id: n.id, label: `${n.table} | ${n.label}`, colour: n.colour ?? '#005f73' },
-        })),
-        ...graph.edges.map((e) => ({
-          data: { id: e.id, source: e.source, target: e.target, label: e.label },
-        })),
-      ],
-      style: [
-        {
-          selector: 'node',
-          style: {
-            label: 'data(label)',
-            'background-color': 'data(colour)',
-            color: '#f1faee',
-            'font-size': '9px',
-            'text-wrap': 'wrap',
-            'text-max-width': '120px',
-            width: 20,
-            height: 20,
-          },
-        },
-        {
-          selector: 'node.selected',
-          style: {
-            'border-width': 3,
-            'border-color': '#ffb703',
-            width: 24,
-            height: 24,
-          },
-        },
-        {
-          selector: '.faded',
-          style: {
-            opacity: 0.2,
-          },
-        },
-        {
-          selector: 'edge',
-          style: {
-            width: 1,
-            'line-color': '#94d2bd',
-            'target-arrow-color': '#94d2bd',
-            'target-arrow-shape': 'triangle',
-            label: 'data(label)',
-            'font-size': '8px',
-            color: '#0a9396',
-            'curve-style': 'bezier',
-          },
-        },
-      ],
-      layout: {
-        name: 'cose',
-        animate: false,
-      },
-    });
+  return (
+    <aside className="graph-legend" aria-label="Graph node colour legend">
+      <p className="graph-legend-title">Entity Legend</p>
+      <div className="graph-legend-list">
+        {items.map((item) => (
+          <button
+            key={item.table}
+            type="button"
+            className={`graph-legend-item${activeTable === item.table ? ' is-active' : ''}`}
+            onClick={() => onToggle(item.table)}
+            title={`Highlight all ${item.table} nodes`}
+          >
+            <span className="graph-colour-dot" style={{ backgroundColor: item.colour }} />
+            {item.table}
+          </button>
+        ))}
+      </div>
+    </aside>
+  );
+}
 
-    cyRef.current = cy;
-    setSelectedNodeId(null);
+function GraphToolbar({
+  hasSelection,
+  isExpanded,
+  onFocus,
+  onReset,
+  onToggleExpand,
+  onZoomOut,
+  onZoomIn,
+}: Readonly<GraphToolbarProps>) {
+  return (
+    <div className="graph-toolbar graph-toolbar-floating">
+      <button
+        type="button"
+        className="graph-toolbar-mini"
+        onClick={onFocus}
+        disabled={!hasSelection}
+        aria-label="Focus selection"
+        title="Focus selection"
+      >
+        Fit
+      </button>
+      <button
+        type="button"
+        className="graph-toolbar-mini"
+        onClick={onReset}
+        aria-label="Reset graph view"
+        title="Reset graph view"
+      >
+        All
+      </button>
+      <button
+        type="button"
+        className="graph-toolbar-mini"
+        onClick={onToggleExpand}
+        aria-label={isExpanded ? 'Close expanded graph' : 'Open expanded graph'}
+        title={isExpanded ? 'Close expanded graph' : 'Open expanded graph'}
+      >
+        {isExpanded ? 'Close' : 'Expand'}
+      </button>
+      <button
+        type="button"
+        className="graph-toolbar-icon"
+        onClick={onZoomOut}
+        aria-label="Zoom out"
+        title="Zoom out"
+      >
+        -
+      </button>
+      <button type="button" className="graph-toolbar-icon" onClick={onZoomIn} aria-label="Zoom in" title="Zoom in">
+        +
+      </button>
+    </div>
+  );
+}
 
-    cy.on('tap', 'node', (event) => {
-      const id = event.target.id();
-      setSelectedNodeId(id);
+function HoverCard({ hoveredNode }: Readonly<HoverCardProps>) {
+  return (
+    <div className="graph-hover-card" style={{ left: `${hoveredNode.x + 16}px`, top: `${hoveredNode.y + 16}px` }}>
+      <span className="graph-colour-dot" style={{ backgroundColor: hoveredNode.colour }} />
+      <p className="graph-hover-eyebrow">{hoveredNode.table}</p>
+      <strong>{hoveredNode.label}</strong>
+    </div>
+  );
+}
 
-      cy.elements().removeClass('selected');
-      event.target.addClass('selected');
-    });
+function NodeDetailCard({ selectedNode, onClear }: Readonly<NodeDetailCardProps>) {
+  const metadataPreview = selectedNode ? Object.entries(selectedNode.data).slice(0, 8) : [];
 
-    return () => {
-      cyRef.current = null;
-      cy.destroy();
-    };
-  }, [graph]);
+  return (
+    <aside className={`graph-card${selectedNode ? ' is-visible' : ''}`}>
+      {selectedNode ? (
+        <>
+          <div className="graph-card-header">
+            <div>
+              <p className="graph-card-eyebrow">{selectedNode.table}</p>
+              <span
+                className="graph-colour-dot graph-colour-dot-inline"
+                style={{ backgroundColor: selectedNode.colour ?? '#005f73' }}
+              />
+              <h3>{selectedNode.label}</h3>
+            </div>
+            <button type="button" className="graph-card-close" onClick={onClear}>
+              Clear
+            </button>
+          </div>
+          <p className="graph-card-copy">Neighbors are highlighted automatically when you select a node.</p>
+          <dl className="graph-card-grid">
+            <div>
+              <dt>Node ID</dt>
+              <dd>{selectedNode.id}</dd>
+            </div>
+            <div>
+              <dt>Entity Type</dt>
+              <dd>{selectedNode.table}</dd>
+            </div>
+            {metadataPreview.map(([key, value]) => (
+              <div key={key}>
+                <dt>{key}</dt>
+                <dd>{formatMetadataValue(value)}</dd>
+              </div>
+            ))}
+          </dl>
+        </>
+      ) : (
+        <>
+          <p className="graph-card-eyebrow">Quick Inspect</p>
+          <h3>Select a node</h3>
+          <p className="graph-card-copy">
+            Clicking any entity opens its detail card here and highlights its local business context in the graph.
+          </p>
+        </>
+      )}
+    </aside>
+  );
+}
 
-  const revealNeighbors = () => {
-    if (!cyRef.current || !selectedNodeId) {
-      return;
-    }
-    const cy = cyRef.current;
-    const selected = cy.getElementById(selectedNodeId);
-    if (!selected || selected.empty()) {
-      return;
-    }
+export function GraphView({ graph, queryMatchedNodeIds = [] }: Readonly<GraphViewProps>) {
+  const {
+    containerRef,
+    hoveredNode,
+    selectedNode,
+    selectedNodeId,
+    tableLegendItems,
+    activeLegendTable,
+    isQueryHighlightActive,
+    isExpanded,
+    setIsExpanded,
+    revealNeighbors,
+    showFullGraph,
+    toggleQueryHighlight,
+    toggleLegendHighlight,
+    zoomBy,
+  } = useGraphInteractions(graph, queryMatchedNodeIds);
 
-    cy.elements().addClass('faded');
-    const neighborhood = selected.closedNeighborhood();
-    neighborhood.removeClass('faded');
-  };
-
-  const showFullGraph = () => {
-    if (!cyRef.current) {
-      return;
-    }
-    cyRef.current.elements().removeClass('faded');
-  };
+  const isSpotlightActive = Boolean(selectedNodeId || isQueryHighlightActive || activeLegendTable);
 
   return (
     <section className="pane graph-pane">
       <h2>Graph Explorer</h2>
-      <div className="graph-toolbar">
-        <button type="button" onClick={revealNeighbors} disabled={!selectedNodeId}>
-          Reveal Neighbors
-        </button>
-        <button type="button" onClick={showFullGraph}>
-          Show Full Graph
-        </button>
-      </div>
-      <div ref={containerRef} className="graph-canvas" />
-      <div className="node-details">
-        <h3>Node Metadata</h3>
-        {selectedNode ? (
-          <>
-            <p>
-              <strong>{selectedNode.table}</strong> / {selectedNode.label}
-            </p>
-            <pre>{JSON.stringify(selectedNode.data, null, 2)}</pre>
-          </>
-        ) : (
-          <p>Select a node in the graph to inspect its metadata.</p>
-        )}
+      <p className="pane-intro">Select an entity to inspect metadata and isolate its local order-to-cash neighborhood.</p>
+      <QueryEvidenceNotice
+        count={queryMatchedNodeIds.length}
+        isActive={isQueryHighlightActive}
+        onToggle={toggleQueryHighlight}
+      />
+      <div className={`graph-stage${isSpotlightActive ? ' spotlight-active' : ''}${isExpanded ? ' is-expanded' : ''}`}>
+        <div ref={containerRef} className="graph-canvas" />
+        <LegendPanel items={tableLegendItems} activeTable={activeLegendTable} onToggle={toggleLegendHighlight} />
+        <GraphToolbar
+          hasSelection={Boolean(selectedNodeId)}
+          isExpanded={isExpanded}
+          onFocus={revealNeighbors}
+          onReset={showFullGraph}
+          onToggleExpand={() => setIsExpanded((previous) => !previous)}
+          onZoomOut={() => zoomBy(0.82)}
+          onZoomIn={() => zoomBy(1.22)}
+        />
+        {hoveredNode ? <HoverCard hoveredNode={hoveredNode} /> : null}
+        <NodeDetailCard selectedNode={selectedNode} onClear={showFullGraph} />
       </div>
     </section>
   );
