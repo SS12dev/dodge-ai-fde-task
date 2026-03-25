@@ -135,3 +135,152 @@ This log captures the key prompts, decisions, and iteration patterns used during
 | `DATA_DIR=./data` resolved from wrong cwd | Checked error message path in HTTP response | Left env var blank, rely on abs-path fallback in main.py |
 | DB path ended at `src/` not repo root | Counted filepath depth: `app/main.py` = 4 levels not 3 | Added extra `dirname()` call |
 | Backend not responding after `Start-Process` | Process spawned detached, no stdout captured | Used background terminal with `isBackground=true` instead |
+
+---
+
+## Phase 5 — Graph View Refactor & Chat UX Overhaul
+
+**Prompts:**
+> "improve graph view" / "rebuild chat panel UX"
+
+**Key actions:**
+- Rewrote `GraphView.tsx`: COSE layout with configurable node/edge styles, node metadata tooltip panel, proper `cy.destroy()` cleanup on unmount, sidebar with table-grouped node counts.
+- Rewrote `ChatPanel.tsx` with analyst workbench UX:
+  - **Tabbed results** — Business Answer / Generated SQL / Raw Data as separate tabs
+  - **Sort/pin** — conversation history with pinned queries persisting at top
+  - **Copy SQL** — one-click clipboard copy of generated SQL
+  - **Keyboard shortcut** — `Ctrl+Enter` submits query
+  - **Drag reorder** — drag handle (⠿) on history items for manual reordering
+  - **Example queries** — guided query buttons pre-fill the textarea
+- Patched the table header misalignment (sticky `thead` with `bg-white`).
+
+**TypeScript issue encountered:**
+- `react-beautiful-dnd` had incompatible types with React 18 strict mode; replaced with lightweight manual drag handler using `onDragStart`/`onDragOver`/`onDrop`.
+
+---
+
+## Phase 6 — Render Backend Deployment Debugging
+
+**Prompt:**
+> "lets deploy" / [multiple iteration prompts as errors arose]
+
+**Initial Render settings:** Docker, Root Directory = `src/backend`
+
+**Iteration 1 — Health Check path:**
+- Render default health check was `/` → returned 404. Fixed: Health Check Path → `/api/health`.
+
+**Iteration 2 — Data files not in repo:**
+- `data/sap-o2c-data/` was in `.gitignore`. Backend crashed on ingest with empty data dir.
+- Fixed: removed the `.gitignore` line, committed and pushed all 73 JSONL files.
+
+**Iteration 3 — DB directory missing in container:**
+- `sqlite3.OperationalError: unable to open database file`
+- Cause: `/app/data/` directory didn't exist inside the running container.
+- Fix: added `os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)` in `database.py` before any connection opens.
+
+**Iteration 4 — `_REPO_ROOT` path wrong inside Docker:**
+- `__file__` in container resolved to `/app/app/database.py`; climbing 4 `dirname()` levels reached `/` not the data dir.
+- Fix: added `DB_PATH` env var `= /app/data/erp.db` on the Render service. Backend honours `os.environ.get("DB_PATH")` first.
+
+**Iteration 5 — `data/` not inside Docker image:**
+- Dockerfile only copied `app/` into the image. The JSONL files existed in the repo but weren't in the container.
+- Fix: Rewrote Dockerfile to build from **repo root context** instead of `src/backend`:
+  ```dockerfile
+  COPY src/backend/requirements.txt .
+  COPY src/backend/app /app/app
+  COPY data /app/data
+  ENV DATA_DIR=/app/data
+  ```
+
+**Iteration 6 — Docker Build Context mismatch:**
+- Root Directory was still `src/backend`, so Docker build context was `src/backend/` — `COPY data` failed (no `data/` under there).
+- Fix in Render service settings:
+  - Root Directory → *(empty)*
+  - Dockerfile Path → `src/backend/Dockerfile`
+  - Docker Build Context → `.`
+- Build succeeded on next deploy.
+
+**Iteration 7 — Stale `DATA_DIR` env var:**
+- An old `DATA_DIR=/opt/render/project/src/data` env var was set from a prior attempt. Backend read it and looked in the wrong place → ingest returned 400.
+- Fix: deleted the env var in Render dashboard; Dockerfile `ENV DATA_DIR=/app/data` took effect.
+- Ingest ran: `POST /api/ingest/load` → all 16 SAP O2C tables loaded.
+
+**Key debugging command used:**
+```powershell
+Invoke-RestMethod -Uri "https://dodge-ai-backend-fcs8.onrender.com/api/ingest/load" `
+  -Method POST -ContentType "application/json" -Body "{}"
+```
+
+---
+
+## Phase 7 — Frontend Static Site Deployment (Render)
+
+**Prompt:**
+> "now lets deploy the frontend"
+
+**Render Static Site settings:**
+- Root Directory: `src/frontend`
+- Build Command: `npm ci && npm run build`
+- Publish Directory: `dist`
+- Env var: `VITE_API_BASE_URL=https://dodge-ai-backend-fcs8.onrender.com`
+
+**Outcome:** Build succeeded first attempt. Site live at `https://dodge-ai-frontend-d1ee.onrender.com`.
+
+---
+
+## Phase 8 — Post-deploy CORS Wiring
+
+**Action:**
+- Set `CORS_ORIGINS=https://dodge-ai-frontend-d1ee.onrender.com,http://localhost:5173` on backend Render service.
+- Triggered redeploy; confirmed browser requests from frontend reach backend without CORS errors.
+
+---
+
+## Phase 9 — Favicon & Tab Title Polish
+
+**Prompt:**
+> "can you fix the title and icon in the tab"
+
+**Actions:**
+- Updated `src/frontend/index.html`: `<title>Dodge AI — O2C Analyst Workbench</title>`
+- Previous `favicon.svg` was the default purple Vite logo.
+- Replaced with a custom teal graph icon (dark teal rect, white circle nodes, white edge lines) matching the analyst workbench brand.
+- Created `public/favicon-v2.svg` (cache-busting copy) and updated `index.html` to reference it.
+
+**Issue encountered:**
+- `replace_string_in_file` on the SVG only replaced the opening `<svg>` tag, leaving old content appended → corrupted file.
+- Fix: used PowerShell `Set-Content` with a heredoc string to atomically overwrite both SVG files.
+
+**Committed:** `926e04e` — pushed to master.
+
+---
+
+## Phase 10 — Submission Preparation
+
+**Prompt:**
+> "help me prepare everything for submission"
+
+**Actions:**
+- Audited README: confirmed all required sections present (architecture, LLM strategy, guardrails, setup, supported queries, deployment).
+- Added live demo URL, backend API URL, and GitHub URL to README header.
+- Extended this session log with Phases 5–10.
+- Created `sessions.zip` for form upload.
+
+**Submission details:**
+- Live demo: https://dodge-ai-frontend-d1ee.onrender.com
+- Backend: https://dodge-ai-backend-fcs8.onrender.com
+- GitHub: https://github.com/SS12dev/dodge-ai-fde-task
+- Form: https://forms.gle/sPDBUvA45cUM3dyc8
+
+---
+
+## Extended Debugging Workflow
+
+| Issue | Diagnosis | Fix |
+|---|---|---|
+| Docker COPY of data/ failed | Root Directory set to `src/backend`; build context didn't include repo root | Changed Root Dir to empty, set Dockerfile Path + Build Context explicitly |
+| `sqlite3.OperationalError` on DB open | Container had no `/app/data/` directory | Added `os.makedirs()` before connection in `database.py` |
+| `_REPO_ROOT` resolved to `/` inside container | `dirname()` chain counted too many levels | Added explicit `DB_PATH` env var; backend honours it first |
+| Stale env var overriding Dockerfile ENV | Old `DATA_DIR` set in Render dashboard pointed to wrong path | Deleted env var from Render; Dockerfile ENV took effect |
+| SVG file corrupted after replace_string | Tool only matched opening `<svg>` tag, appended old body | Used PowerShell `Set-Content` heredoc for atomic overwrite |
+| Ingest 405 when testing from browser | Browser sent GET; endpoint requires POST | Used `Invoke-RestMethod -Method POST` |
