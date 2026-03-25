@@ -5,7 +5,6 @@ __pycache__/
 *.pyo
 *.db
 data/*.db
-data/sap-o2c-data/
 smoke_output.txt
 smoke_reports/
 src/backend/benchmark_results/
