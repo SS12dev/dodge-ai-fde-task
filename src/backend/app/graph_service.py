@@ -1,92 +1,136 @@
 from __future__ import annotations
 
-from collections import defaultdict
-
 from .database import get_connection
 
+# SAP O2C entity → primary key column
+ENTITY_PK: dict[str, str] = {
+    "sales_order_headers": "sales_order",
+    "sales_order_items": "sales_order",
+    "sales_order_schedule_lines": "sales_order",
+    "outbound_delivery_headers": "delivery_document",
+    "outbound_delivery_items": "delivery_document",
+    "billing_document_headers": "billing_document",
+    "billing_document_items": "billing_document",
+    "billing_document_cancellations": "billing_document",
+    "journal_entry_items_accounts_receivable": "accounting_document",
+    "payments_accounts_receivable": "accounting_document",
+    "business_partners": "business_partner",
+    "business_partner_addresses": "business_partner",
+    "customer_company_assignments": "customer",
+    "customer_sales_area_assignments": "customer",
+    "products": "product",
+    "product_descriptions": "product",
+    "product_plants": "product",
+    "product_storage_locations": "product",
+    "plants": "plant",
+}
 
-def _pick_id_column(columns: list[str]) -> str | None:
-    candidates = [c for c in columns if c == "id" or c.endswith("_id")]
-    return candidates[0] if candidates else None
+# Explicit O2C flow edges: (source_table, source_fk_col, target_table)
+O2C_EDGES: list[tuple[str, str, str]] = [
+    ("sales_order_items",           "sales_order",           "sales_order_headers"),
+    ("sales_order_schedule_lines",  "sales_order",           "sales_order_headers"),
+    ("sales_order_headers",         "sold_to_party",         "business_partners"),
+    ("sales_order_items",           "material",              "products"),
+    ("outbound_delivery_items",     "reference_sd_document", "sales_order_headers"),
+    ("outbound_delivery_items",     "delivery_document",     "outbound_delivery_headers"),
+    ("billing_document_items",      "reference_sd_document", "outbound_delivery_headers"),
+    ("billing_document_items",      "material",              "products"),
+    ("billing_document_items",      "billing_document",      "billing_document_headers"),
+    ("billing_document_headers",    "sold_to_party",         "business_partners"),
+    ("journal_entry_items_accounts_receivable", "reference_document", "billing_document_headers"),
+    ("payments_accounts_receivable","sales_document",        "sales_order_headers"),
+    ("product_descriptions",        "product",               "products"),
+    ("product_plants",              "product",               "products"),
+    ("product_plants",              "plant",                 "plants"),
+    ("product_storage_locations",   "product",               "products"),
+    ("business_partner_addresses",  "business_partner",      "business_partners"),
+    ("customer_company_assignments","customer",              "business_partners"),
+    ("customer_sales_area_assignments", "customer",          "business_partners"),
+]
+
+_COLOURS: dict[str, str] = {
+    "sales_order_headers": "#005f73",
+    "sales_order_items": "#0a9396",
+    "outbound_delivery_headers": "#94d2bd",
+    "outbound_delivery_items": "#52b788",
+    "billing_document_headers": "#e9c46a",
+    "billing_document_items": "#f4a261",
+    "billing_document_cancellations": "#e76f51",
+    "journal_entry_items_accounts_receivable": "#264653",
+    "payments_accounts_receivable": "#2a9d8f",
+    "business_partners": "#8338ec",
+    "products": "#3a86ff",
+    "plants": "#fb8500",
+}
+
+
+def _existing_tables(conn) -> set[str]:
+    return {
+        r[0]
+        for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+        ).fetchall()
+        if r[0] != "app_metadata"
+    }
 
 
 def list_graph_nodes(limit_per_table: int = 25) -> dict:
     nodes = []
+    seen_node_ids: set[str] = set()
     with get_connection() as conn:
-        tables = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
-        ).fetchall()
-        for trow in tables:
-            table = trow[0]
-            if table == "app_metadata":
+        tables = _existing_tables(conn)
+        for table in sorted(tables):
+            pk = ENTITY_PK.get(table)
+            if not pk:
+                cols = [r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()]
+                pk = cols[0] if cols else None
+            if not pk:
                 continue
-            cols = [r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()]
-            id_col = _pick_id_column(cols)
             rows = conn.execute(f"SELECT * FROM {table} LIMIT ?", (limit_per_table,)).fetchall()
+            colour = _COLOURS.get(table, "#888")
             for row in rows:
-                row_dict = dict(row)
-                node_id_value = row_dict.get(id_col) if id_col else row_dict.get(cols[0])
-                node_id = f"{table}:{node_id_value}"
-                nodes.append(
-                    {
-                        "id": node_id,
-                        "table": table,
-                        "label": str(node_id_value),
-                        "data": row_dict,
-                    }
-                )
+                rd = dict(row)
+                pk_val = rd.get(pk, "?")
+                node_id = f"{table}:{pk_val}"
+                # Cytoscape requires globally unique element IDs.
+                if node_id in seen_node_ids:
+                    continue
+                seen_node_ids.add(node_id)
+                nodes.append({
+                    "id": node_id,
+                    "table": table,
+                    "label": str(pk_val),
+                    "group": table,
+                    "colour": colour,
+                    "data": rd,
+                })
     return {"nodes": nodes}
 
 
 def infer_graph_edges(limit_per_table: int = 200) -> dict:
-    edges = []
-    index_by_table_id = defaultdict(set)
+    edges: list[dict] = []
+    seen: set[str] = set()
 
     with get_connection() as conn:
-        tables = [
-            r[0]
-            for r in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+        tables = _existing_tables(conn)
+        for src_table, src_fk, tgt_table in O2C_EDGES:
+            if src_table not in tables or tgt_table not in tables:
+                continue
+            src_pk = ENTITY_PK.get(src_table, src_fk)
+            tgt_pk = ENTITY_PK.get(tgt_table, src_fk)
+            src_cols = {r[1] for r in conn.execute(f"PRAGMA table_info({src_table})").fetchall()}
+            tgt_cols = {r[1] for r in conn.execute(f"PRAGMA table_info({tgt_table})").fetchall()}
+            if src_fk not in src_cols or tgt_pk not in tgt_cols:
+                continue
+            rows = conn.execute(
+                f"SELECT {src_pk}, {src_fk} FROM {src_table} WHERE {src_fk} IS NOT NULL LIMIT ?",
+                (limit_per_table,),
             ).fetchall()
-            if r[0] != "app_metadata"
-        ]
-
-        table_columns = {}
-        table_id_col = {}
-        for table in tables:
-            cols = [r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()]
-            table_columns[table] = cols
-            table_id_col[table] = _pick_id_column(cols)
-
-            id_col = table_id_col[table]
-            if id_col:
-                id_rows = conn.execute(f"SELECT {id_col} FROM {table} LIMIT ?", (limit_per_table,)).fetchall()
-                index_by_table_id[table].update(str(r[0]) for r in id_rows if r[0] is not None)
-
-        for source_table in tables:
-            cols = table_columns[source_table]
-            fk_like_cols = [c for c in cols if c.endswith("_id") and c != table_id_col[source_table]]
-
-            source_rows = conn.execute(f"SELECT * FROM {source_table} LIMIT ?", (limit_per_table,)).fetchall()
-            for row in source_rows:
-                record = dict(row)
-                source_node = f"{source_table}:{record.get(table_id_col[source_table], record.get(cols[0]))}"
-                for fk_col in fk_like_cols:
-                    fk_val = record.get(fk_col)
-                    if fk_val is None:
-                        continue
-                    fk_val = str(fk_val)
-                    for target_table in tables:
-                        if fk_val in index_by_table_id[target_table]:
-                            target_id_col = table_id_col[target_table]
-                            target_node = f"{target_table}:{fk_val}" if target_id_col else f"{target_table}:{fk_val}"
-                            edges.append(
-                                {
-                                    "id": f"{source_node}->{target_node}:{fk_col}",
-                                    "source": source_node,
-                                    "target": target_node,
-                                    "label": fk_col,
-                                }
-                            )
-
+            for row in rows:
+                src_node = f"{src_table}:{row[0]}"
+                tgt_node = f"{tgt_table}:{row[1]}"
+                edge_id = f"{src_node}→{tgt_node}"
+                if edge_id not in seen:
+                    seen.add(edge_id)
+                    edges.append({"id": edge_id, "source": src_node, "target": tgt_node, "label": src_fk})
     return {"edges": edges}

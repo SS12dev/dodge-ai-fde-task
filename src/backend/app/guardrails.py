@@ -5,18 +5,17 @@ import re
 import sqlparse
 
 DOMAIN_KEYWORDS = {
-    "order",
-    "delivery",
-    "invoice",
-    "billing",
-    "payment",
-    "customer",
-    "product",
-    "material",
-    "address",
-    "sales",
-    "sap",
-    "journal",
+    # core O2C document types
+    "order", "deliver", "invoic", "billing", "payment",
+    # entities
+    "customer", "product", "material", "address", "sales", "sap", "journal",
+    "partner", "plant", "document", "shipment",
+    # SAP-specific terms
+    "accounting", "fiscal", "companycode", "schedule", "cancellation",
+    "outbound", "inbound", "billed", "unbilled", "blocked", "quantity", "currency",
+    # analytics / flow
+    "trace", "flow", "o2c", "status", "report", "history", "erp",
+    "amount", "revenue", "open", "closed", "complete", "incomplete",
 }
 
 READ_ONLY_PREFIXES = ("select", "with")
@@ -24,8 +23,8 @@ FORBIDDEN_SQL = {"insert", "update", "delete", "drop", "alter", "truncate", "cre
 
 
 def is_domain_question(question: str) -> bool:
-    tokens = set(re.findall(r"[a-zA-Z]+", question.lower()))
-    return len(tokens.intersection(DOMAIN_KEYWORDS)) > 0
+    lowered = question.lower()
+    return any(kw in lowered for kw in DOMAIN_KEYWORDS)
 
 
 def validate_sql_read_only(sql: str, allowed_tables: set[str]) -> tuple[bool, str]:
