@@ -1,0 +1,8 @@
+# Tell Railway this is the Python service root
+[build]
+builder = "nixpacks"
+
+[deploy]
+startCommand = "python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+restartPolicyType = "on-failure"
+restartPolicyMaxRetries = 3
