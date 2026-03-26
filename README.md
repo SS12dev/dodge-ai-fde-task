@@ -1,8 +1,8 @@
 # Dodge AI FDE Task — Context Graph & NL Query System
 
-**Live Demo:** https://dodge-ai-frontend-d1ee.onrender.com  
-**Backend API:** https://dodge-ai-backend-fcs8.onrender.com/api/health  
-**GitHub:** https://github.com/SS12dev/dodge-ai-fde-task
+**Live Demo:** Add your final deployed app URL before submission  
+**Backend API:** Add your final backend health URL before submission  
+**GitHub:** Add your final public repository URL before submission
 
 A full-stack application that models fragmented ERP business data (Orders, Deliveries, Invoices, Payments) as an interconnected graph, visualises it, and lets users ask natural-language questions that are translated into live SQL queries grounded in the dataset.
 

@@ -207,7 +207,7 @@ This log captures the key prompts, decisions, and iteration patterns used during
 
 **Key debugging command used:**
 ```powershell
-Invoke-RestMethod -Uri "https://dodge-ai-backend-fcs8.onrender.com/api/ingest/load" `
+Invoke-RestMethod -Uri "https://<your-backend-service>.onrender.com/api/ingest/load" `
   -Method POST -ContentType "application/json" -Body "{}"
 ```
 
@@ -261,16 +261,16 @@ Invoke-RestMethod -Uri "https://dodge-ai-backend-fcs8.onrender.com/api/ingest/lo
 - Root Directory: `src/frontend`
 - Build Command: `npm ci && npm run build`
 - Publish Directory: `dist`
-- Env var: `VITE_API_BASE_URL=https://dodge-ai-backend-fcs8.onrender.com`
+- Env var: `VITE_API_BASE_URL=https://<your-backend-service>.onrender.com`
 
-**Outcome:** Build succeeded first attempt. Site live at `https://dodge-ai-frontend-d1ee.onrender.com`.
+**Outcome:** Build succeeded first attempt. Site live at `https://<your-frontend-service>.onrender.com`.
 
 ---
 
 ## Phase 8 — Post-deploy CORS Wiring
 
 **Action:**
-- Set `CORS_ORIGINS=https://dodge-ai-frontend-d1ee.onrender.com,http://localhost:5173` on backend Render service.
+- Set `CORS_ORIGINS=https://<your-frontend-service>.onrender.com,http://localhost:5173` on backend Render service.
 - Triggered redeploy; confirmed browser requests from frontend reach backend without CORS errors.
 
 ---
@@ -306,10 +306,10 @@ Invoke-RestMethod -Uri "https://dodge-ai-backend-fcs8.onrender.com/api/ingest/lo
 - Created `sessions.zip` for form upload.
 
 **Submission details:**
-- Live demo: https://dodge-ai-frontend-d1ee.onrender.com
-- Backend: https://dodge-ai-backend-fcs8.onrender.com
-- GitHub: https://github.com/SS12dev/dodge-ai-fde-task
-- Form: https://forms.gle/sPDBUvA45cUM3dyc8
+- Live demo: add final deployed URL before submission
+- Backend: add final backend URL before submission
+- GitHub: add final public repository URL before submission
+- Form: add current submission form URL before submission
 
 ---
 
