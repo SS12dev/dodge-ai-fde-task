@@ -1,9 +1,14 @@
+import { useState, useEffect } from 'react';
 import type { GraphData, GraphNode } from '../lib/types';
+import type { GraphMode } from '../lib/api';
 import { type HoveredNode, type LegendItem, useGraphInteractions } from './useGraphInteractions';
 
 type GraphViewProps = {
   graph: GraphData;
   queryMatchedNodeIds?: string[];
+  graphMode: GraphMode;
+  isGraphLoading: boolean;
+  onGraphModeChange: (mode: GraphMode) => void;
 };
 
 type QueryEvidenceNoticeProps = {
@@ -20,12 +25,15 @@ type LegendPanelProps = {
 
 type GraphToolbarProps = {
   hasSelection: boolean;
-  isExpanded: boolean;
   onFocus: () => void;
   onReset: () => void;
-  onToggleExpand: () => void;
   onZoomOut: () => void;
   onZoomIn: () => void;
+};
+
+type GraphHudProps = {
+  graphMode: GraphMode;
+  onGraphModeChange: (mode: GraphMode) => void;
 };
 
 type HoverCardProps = {
@@ -50,6 +58,17 @@ function formatMetadataValue(value: unknown): string {
   return JSON.stringify(value);
 }
 
+function LoadingSpinner() {
+  return (
+    <div className="graph-loading-overlay">
+      <div className="graph-loading-spinner">
+        <div className="spinner-ring" />
+        <p className="graph-loading-text">Constructing knowledge graph...</p>
+      </div>
+    </div>
+  );
+}
+
 function QueryEvidenceNotice({ count, isActive, onToggle }: Readonly<QueryEvidenceNoticeProps>) {
   if (count === 0) {
     return null;
@@ -70,33 +89,74 @@ function LegendPanel({ items, activeTable, onToggle }: Readonly<LegendPanelProps
     return null;
   }
 
+  const stageOrder = ['Orders', 'Delivery', 'Billing', 'Finance', 'Other'];
+  const grouped = stageOrder
+    .map((stage) => ({
+      stage,
+      items: items
+        .filter((item) => item.stage === stage)
+        .sort((left, right) => left.table.localeCompare(right.table)),
+    }))
+    .filter((group) => group.items.length > 0);
+
   return (
     <aside className="graph-legend" aria-label="Graph node colour legend">
       <p className="graph-legend-title">Entity Legend</p>
       <div className="graph-legend-list">
-        {items.map((item) => (
-          <button
-            key={item.table}
-            type="button"
-            className={`graph-legend-item${activeTable === item.table ? ' is-active' : ''}`}
-            onClick={() => onToggle(item.table)}
-            title={`Highlight all ${item.table} nodes`}
-          >
-            <span className="graph-colour-dot" style={{ backgroundColor: item.colour }} />
-            {item.table}
-          </button>
+        {grouped.map((group) => (
+          <section key={group.stage} className="graph-legend-stage">
+            <p className="graph-legend-stage-title">{group.stage}</p>
+            {group.items.map((item) => (
+              <button
+                key={item.table}
+                type="button"
+                className={`graph-legend-item${activeTable === item.table ? ' is-active' : ''}`}
+                onClick={() => onToggle(item.table)}
+                title={`Highlight all ${item.table} nodes`}
+              >
+                <span className="graph-colour-dot" style={{ backgroundColor: item.colour }} />
+                {item.table}
+              </button>
+            ))}
+          </section>
         ))}
       </div>
     </aside>
   );
 }
 
+function GraphHud({ graphMode, onGraphModeChange }: Readonly<GraphHudProps>) {
+  return (
+    <div className="graph-hud">
+      <div className="graph-hud-header-row">
+        <h1>Dodge AI O2C Context Graph</h1>
+      </div>
+      <div className="graph-mode-switch" aria-label="Graph mode">
+        <button
+          type="button"
+          className={`graph-mode-btn${graphMode === 'fast' ? ' is-active' : ''}`}
+          onClick={() => onGraphModeChange('fast')}
+          title="Faster load with a curated connected view"
+        >
+          Fast
+        </button>
+        <button
+          type="button"
+          className={`graph-mode-btn${graphMode === 'full' ? ' is-active' : ''}`}
+          onClick={() => onGraphModeChange('full')}
+          title="Full unfiltered graph payload"
+        >
+          Full
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function GraphToolbar({
   hasSelection,
-  isExpanded,
   onFocus,
   onReset,
-  onToggleExpand,
   onZoomOut,
   onZoomIn,
 }: Readonly<GraphToolbarProps>) {
@@ -119,16 +179,7 @@ function GraphToolbar({
         aria-label="Reset graph view"
         title="Reset graph view"
       >
-        All
-      </button>
-      <button
-        type="button"
-        className="graph-toolbar-mini"
-        onClick={onToggleExpand}
-        aria-label={isExpanded ? 'Close expanded graph' : 'Open expanded graph'}
-        title={isExpanded ? 'Close expanded graph' : 'Open expanded graph'}
-      >
-        {isExpanded ? 'Close' : 'Expand'}
+        Reset
       </button>
       <button
         type="button"
@@ -157,57 +208,67 @@ function HoverCard({ hoveredNode }: Readonly<HoverCardProps>) {
 }
 
 function NodeDetailCard({ selectedNode, onClear }: Readonly<NodeDetailCardProps>) {
+  if (!selectedNode) {
+    return null;
+  }
+
   const metadataPreview = selectedNode ? Object.entries(selectedNode.data).slice(0, 8) : [];
 
   return (
-    <aside className={`graph-card${selectedNode ? ' is-visible' : ''}`}>
-      {selectedNode ? (
-        <>
-          <div className="graph-card-header">
-            <div>
-              <p className="graph-card-eyebrow">{selectedNode.table}</p>
-              <span
-                className="graph-colour-dot graph-colour-dot-inline"
-                style={{ backgroundColor: selectedNode.colour ?? '#005f73' }}
-              />
-              <h3>{selectedNode.label}</h3>
-            </div>
-            <button type="button" className="graph-card-close" onClick={onClear}>
-              Clear
-            </button>
+    <aside className="graph-card graph-popup">
+      <div className="graph-card-header">
+        <div>
+          <p className="graph-card-eyebrow">{selectedNode.table}</p>
+          <span
+            className="graph-colour-dot graph-colour-dot-inline"
+            style={{ backgroundColor: selectedNode.colour ?? '#005f73' }}
+          />
+          <h3>{selectedNode.label}</h3>
+        </div>
+        <button type="button" className="graph-card-close" onClick={onClear}>
+          Close
+        </button>
+      </div>
+      <p className="graph-card-copy">Connected neighbors stay highlighted so the local document path remains visible.</p>
+      <dl className="graph-card-grid">
+        <div>
+          <dt>Node ID</dt>
+          <dd>{selectedNode.id}</dd>
+        </div>
+        <div>
+          <dt>Entity Type</dt>
+          <dd>{selectedNode.table}</dd>
+        </div>
+        {metadataPreview.map(([key, value]) => (
+          <div key={key}>
+            <dt>{key}</dt>
+            <dd>{formatMetadataValue(value)}</dd>
           </div>
-          <p className="graph-card-copy">Neighbors are highlighted automatically when you select a node.</p>
-          <dl className="graph-card-grid">
-            <div>
-              <dt>Node ID</dt>
-              <dd>{selectedNode.id}</dd>
-            </div>
-            <div>
-              <dt>Entity Type</dt>
-              <dd>{selectedNode.table}</dd>
-            </div>
-            {metadataPreview.map(([key, value]) => (
-              <div key={key}>
-                <dt>{key}</dt>
-                <dd>{formatMetadataValue(value)}</dd>
-              </div>
-            ))}
-          </dl>
-        </>
-      ) : (
-        <>
-          <p className="graph-card-eyebrow">Quick Inspect</p>
-          <h3>Select a node</h3>
-          <p className="graph-card-copy">
-            Clicking any entity opens its detail card here and highlights its local business context in the graph.
-          </p>
-        </>
-      )}
+        ))}
+      </dl>
     </aside>
   );
 }
 
-export function GraphView({ graph, queryMatchedNodeIds = [] }: Readonly<GraphViewProps>) {
+export function GraphView({
+  graph,
+  queryMatchedNodeIds = [],
+  graphMode,
+  isGraphLoading,
+  onGraphModeChange,
+}: Readonly<GraphViewProps>) {
+  const [isConstructing, setIsConstructing] = useState(true);
+
+  // Track when graph construction completes
+  useEffect(() => {
+    if ((graph?.nodes?.length ?? 0) > 0) {
+      // Use setTimeout to ensure layout calculation is complete
+      const timer = setTimeout(() => setIsConstructing(false), 300);
+      return () => clearTimeout(timer);
+    }
+    return undefined;
+  }, [graph]);
+
   const {
     containerRef,
     hoveredNode,
@@ -216,8 +277,6 @@ export function GraphView({ graph, queryMatchedNodeIds = [] }: Readonly<GraphVie
     tableLegendItems,
     activeLegendTable,
     isQueryHighlightActive,
-    isExpanded,
-    setIsExpanded,
     revealNeighbors,
     showFullGraph,
     toggleQueryHighlight,
@@ -228,26 +287,26 @@ export function GraphView({ graph, queryMatchedNodeIds = [] }: Readonly<GraphVie
   const isSpotlightActive = Boolean(selectedNodeId || isQueryHighlightActive || activeLegendTable);
 
   return (
-    <section className="pane graph-pane">
-      <h2>Graph Explorer</h2>
-      <p className="pane-intro">Select an entity to inspect metadata and isolate its local order-to-cash neighborhood.</p>
+    <section className="graph-workspace">
+      {(isGraphLoading || isConstructing) && <LoadingSpinner />}
       <QueryEvidenceNotice
         count={queryMatchedNodeIds.length}
         isActive={isQueryHighlightActive}
         onToggle={toggleQueryHighlight}
       />
-      <div className={`graph-stage${isSpotlightActive ? ' spotlight-active' : ''}${isExpanded ? ' is-expanded' : ''}`}>
+      <div className={`graph-stage${isSpotlightActive ? ' spotlight-active' : ''}`}>
         <div ref={containerRef} className="graph-canvas" />
+        <div className="graph-top-left-stack">
+          <GraphHud graphMode={graphMode} onGraphModeChange={onGraphModeChange} />
+          <GraphToolbar
+            hasSelection={Boolean(selectedNodeId)}
+            onFocus={revealNeighbors}
+            onReset={showFullGraph}
+            onZoomOut={() => zoomBy(0.82)}
+            onZoomIn={() => zoomBy(1.22)}
+          />
+        </div>
         <LegendPanel items={tableLegendItems} activeTable={activeLegendTable} onToggle={toggleLegendHighlight} />
-        <GraphToolbar
-          hasSelection={Boolean(selectedNodeId)}
-          isExpanded={isExpanded}
-          onFocus={revealNeighbors}
-          onReset={showFullGraph}
-          onToggleExpand={() => setIsExpanded((previous) => !previous)}
-          onZoomOut={() => zoomBy(0.82)}
-          onZoomIn={() => zoomBy(1.22)}
-        />
         {hoveredNode ? <HoverCard hoveredNode={hoveredNode} /> : null}
         <NodeDetailCard selectedNode={selectedNode} onClear={showFullGraph} />
       </div>

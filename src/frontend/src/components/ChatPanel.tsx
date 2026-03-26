@@ -1,4 +1,4 @@
-import { type KeyboardEvent, type ReactNode, useMemo, useState } from 'react';
+import { type KeyboardEvent, useEffect, useRef, useState } from 'react';
 import { runQuestion } from '../lib/api';
 import type { QueryResponse } from '../lib/types';
 
@@ -6,12 +6,11 @@ type ChatPanelProps = {
   onQueryResult?: (question: string, response: QueryResponse) => void;
 };
 
-type ResultSection = 'results' | 'sql';
-type SortDirection = 'asc' | 'desc';
-type SortState = {
-  column: string;
-  direction: SortDirection;
-} | null;
+type ChatExchange = {
+  id: string;
+  question: string;
+  response: QueryResponse;
+};
 
 const EXAMPLES = [
   'Which products are associated with the highest number of billing documents?',
@@ -19,7 +18,6 @@ const EXAMPLES = [
   'Identify sales orders that are delivered but not billed',
 ];
 
-const PINNED_PROMPTS_STORAGE_KEY = 'dodgeai.pinnedPrompts';
 
 function toCellText(value: unknown): string {
   if (value === null || value === undefined) {
@@ -34,74 +32,71 @@ function toCellText(value: unknown): string {
   return JSON.stringify(value);
 }
 
-function compareValues(left: unknown, right: unknown, direction: SortDirection): number {
-  const leftText = toCellText(left);
-  const rightText = toCellText(right);
+type ResultTableProps = {
+  rows: Record<string, unknown>[];
+  totalRows: number;
+  tableId: string;
+  expandedTables: Set<string>;
+  onToggleExpand: (tableId: string) => void;
+  sortColumn: string | null;
+  sortDirection: 'asc' | 'desc';
+  onSort: (column: string) => void;
+};
 
-  const leftNumeric = Number(leftText);
-  const rightNumeric = Number(rightText);
-  const bothNumeric = Number.isFinite(leftNumeric) && Number.isFinite(rightNumeric);
-
-  let comparison = 0;
-  if (bothNumeric) {
-    comparison = leftNumeric - rightNumeric;
-  } else {
-    comparison = leftText.localeCompare(rightText, undefined, { numeric: true, sensitivity: 'base' });
-  }
-
-  return direction === 'asc' ? comparison : -comparison;
-}
-
-function ResultTable({ rows }: Readonly<{ rows: Record<string, unknown>[] }>) {
+function ResultTable({
+  rows,
+  totalRows,
+  tableId,
+  expandedTables,
+  onToggleExpand,
+  sortColumn,
+  sortDirection,
+  onSort,
+}: Readonly<ResultTableProps>) {
   const tableColumns = rows.length > 0 ? Object.keys(rows[0]) : [];
-  const [showAllRows, setShowAllRows] = useState(false);
-  const [sortState, setSortState] = useState<SortState>(null);
-
-  const previewCount = 12;
-  const sortedRows = useMemo(() => {
-    if (!sortState) {
-      return rows;
-    }
-
-    const nextRows = [...rows];
-    nextRows.sort((left, right) => compareValues(left[sortState.column], right[sortState.column], sortState.direction));
-    return nextRows;
-  }, [rows, sortState]);
-
-  const visibleRows = showAllRows ? sortedRows : sortedRows.slice(0, previewCount);
-
-  const toggleSort = (column: string) => {
-    setSortState((previous) => {
-      if (previous?.column !== column) {
-        return { column, direction: 'asc' };
-      }
-      if (previous.direction === 'asc') {
-        return { column, direction: 'desc' };
-      }
-      return null;
-    });
-  };
-
-  const sortMarker = (column: string) => {
-    if (sortState?.column !== column) {
-      return '';
-    }
-    return sortState.direction === 'asc' ? ' ▲' : ' ▼';
-  };
+  const isExpanded = expandedTables.has(tableId);
+  const displayRows = isExpanded ? rows : rows.slice(0, 5);
 
   if (rows.length === 0) {
     return <p>No rows returned.</p>;
   }
 
+  const compareValues = (a: unknown, b: unknown): number => {
+    if (a === null || a === undefined) return 1;
+    if (b === null || b === undefined) return -1;
+
+    if (typeof a === 'number' && typeof b === 'number') {
+      return a - b;
+    }
+    if (typeof a === 'string' && typeof b === 'string') {
+      return a.localeCompare(b);
+    }
+    const aStr = toCellText(a);
+    const bStr = toCellText(b);
+    return aStr.localeCompare(bStr);
+  };
+
+  const sortedRows = [...displayRows];
+  if (sortColumn && tableColumns.includes(sortColumn)) {
+    sortedRows.sort((a, b) => {
+      const comparison = compareValues(a[sortColumn], b[sortColumn]);
+      return sortDirection === 'asc' ? comparison : -comparison;
+    });
+  }
+
   return (
-    <div className="rows-table-wrap">
-      <div className="rows-table-meta">
+    <div className="rows-table-wrap rows-table-wrap-compact">
+      <div className="rows-table-meta rows-table-meta-compact">
         <span>
-          Showing {visibleRows.length} of {rows.length} row{rows.length === 1 ? '' : 's'}
+          {isExpanded ? `Showing all ${totalRows}` : `Previewing ${displayRows.length} of ${totalRows}`} row{totalRows === 1 ? '' : 's'}
         </span>
-        {rows.length > previewCount ? (
-          <button type="button" className="rows-toggle" onClick={() => setShowAllRows((previous) => !previous)}>
-            {showAllRows ? `Show first ${previewCount}` : 'Show all rows'}
+        {totalRows > 5 ? (
+          <button
+            type="button"
+            className="rows-table-expand-btn"
+            onClick={() => onToggleExpand(tableId)}
+          >
+            {isExpanded ? 'Show preview' : 'Show all'}
           </button>
         ) : null}
       </div>
@@ -109,23 +104,33 @@ function ResultTable({ rows }: Readonly<{ rows: Record<string, unknown>[] }>) {
         <table className="rows-table">
           <thead>
             <tr>
-              {tableColumns.map((col) => (
-                <th key={col} className="rows-table-heading" onClick={() => toggleSort(col)} title="Click to sort">
+              {tableColumns.map((column) => (
+                <th
+                  key={column}
+                  className={`rows-table-heading${sortColumn === column ? ' is-sorted' : ''}`}
+                  onClick={() => onSort(column)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      onSort(column);
+                    }
+                  }}
+                >
                   <span className="column-sort-label">
-                    {col}
-                    {sortMarker(col)}
+                    {column}
+                    {sortColumn === column && <span className="sort-indicator">{sortDirection === 'asc' ? ' ↑' : ' ↓'}</span>}
                   </span>
                 </th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {visibleRows.map((row, index) => {
+            {sortedRows.map((row, index) => {
               const rowKey = `${index}-${JSON.stringify(row)}`;
               return (
                 <tr key={rowKey}>
-                  {tableColumns.map((col) => (
-                    <td key={`${rowKey}-${col}`}>{toCellText(row[col])}</td>
+                  {tableColumns.map((column) => (
+                    <td key={`${rowKey}-${column}`}>{toCellText(row[column])}</td>
                   ))}
                 </tr>
               );
@@ -138,161 +143,73 @@ function ResultTable({ rows }: Readonly<{ rows: Record<string, unknown>[] }>) {
 }
 
 function SqlPanel({ sql }: Readonly<{ sql: string }>) {
-  const [copied, setCopied] = useState(false);
-
-  const onCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(sql);
-      setCopied(true);
-      globalThis.setTimeout(() => setCopied(false), 1200);
-    } catch {
-      setCopied(false);
-    }
-  };
-
   return (
-    <div className="sql-panel">
-      <div className="sql-panel-head">
-        <p>Generated SQL</p>
-        <button type="button" className="sql-copy" onClick={onCopy}>
-          {copied ? 'Copied' : 'Copy SQL'}
-        </button>
-      </div>
+    <div className="sql-panel sql-panel-inline">
       <pre>{sql}</pre>
     </div>
   );
 }
 
-type ResultTabsProps = {
-  activeSection: ResultSection;
-  rowCount: number;
-  hasSql: boolean;
-  onSelect: (section: ResultSection) => void;
-};
-
-function ResultTabs({ activeSection, rowCount, hasSql, onSelect }: Readonly<ResultTabsProps>) {
-  return (
-    <div className="result-rail">
-      <button
-        type="button"
-        className={`result-tab${activeSection === 'results' ? ' is-active' : ''}`}
-        onClick={() => onSelect('results')}
-      >
-        Results ({rowCount})
-      </button>
-      <button
-        type="button"
-        className={`result-tab${activeSection === 'sql' ? ' is-active' : ''}`}
-        onClick={() => onSelect('sql')}
-        disabled={!hasSql}
-      >
-        SQL
-      </button>
-    </div>
-  );
-}
-
-type ResultWorkspaceProps = {
-  result: QueryResponse;
-  activeSection: ResultSection;
-  onSelectSection: (section: ResultSection) => void;
-};
-
-function ResultWorkspace({ result, activeSection, onSelectSection }: Readonly<ResultWorkspaceProps>) {
-  const rows = result.rows ?? [];
-
-  let sectionContent: ReactNode;
-  if (activeSection === 'results') {
-    sectionContent = (
-      <>
-        {result.ok ? <p className="answer-copy answer-copy-compact">{result.answer}</p> : <p className="error">{result.error}</p>}
-        <div className="query-meta-stack">
-          {result.generation_source ? (
-            <p className="query-meta">
-              Mode: <strong>{result.generation_source}</strong>
-              {result.model_name ? ` (${result.model_name})` : ''}
-            </p>
-          ) : null}
-          <p className="query-meta">
-            Rows returned: <strong>{rows.length}</strong>
-          </p>
-        </div>
-        <ResultTable rows={rows} />
-      </>
-    );
-  } else if (result.sql) {
-    sectionContent = <SqlPanel sql={result.sql} />;
-  } else {
-    sectionContent = <p>No SQL generated for this response.</p>;
+function buildExchangeId(): string {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return crypto.randomUUID();
   }
 
-  return (
-    <div className="result">
-      <ResultTabs
-        activeSection={activeSection}
-        rowCount={rows.length}
-        hasSql={Boolean(result.sql)}
-        onSelect={onSelectSection}
-      />
-      <div className="result-panel">{sectionContent}</div>
-    </div>
-  );
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-function loadPinnedPrompts(): string[] {
-  try {
-    const raw = globalThis.localStorage.getItem(PINNED_PROMPTS_STORAGE_KEY);
-    if (!raw) {
-      return [EXAMPLES[0]];
-    }
-
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) {
-      return [EXAMPLES[0]];
-    }
-
-    const prompts = parsed
-      .filter((entry): entry is string => typeof entry === 'string')
-      .map((entry) => entry.trim())
-      .filter((entry) => entry.length > 0);
-
-    return prompts.length > 0 ? prompts : [EXAMPLES[0]];
-  } catch {
-    return [EXAMPLES[0]];
-  }
-}
 
 export function ChatPanel({ onQueryResult }: Readonly<ChatPanelProps>) {
   const [question, setQuestion] = useState('');
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<QueryResponse | null>(null);
-  const [activeSection, setActiveSection] = useState<ResultSection>('results');
-  const [pinnedQuestions, setPinnedQuestions] = useState<string[]>(loadPinnedPrompts);
-  const [draggedPinnedPrompt, setDraggedPinnedPrompt] = useState<string | null>(null);
-  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(true);
+  const [history, setHistory] = useState<ChatExchange[]>([]);
+  const [expandedSqlIds, setExpandedSqlIds] = useState<string[]>([]);
+  const [highlightedExchangeId, setHighlightedExchangeId] = useState<string | null>(null);
+  const [pendingQuestion, setPendingQuestion] = useState<string | null>(null);
+  const [expandedTables, setExpandedTables] = useState<Set<string>>(new Set());
+  const [tableSortState, setTableSortState] = useState<{ tableId: string; column: string | null; direction: 'asc' | 'desc' }>({
+    tableId: '',
+    column: null,
+    direction: 'asc',
+  });
+  const scrollAnchorRef = useRef<HTMLDivElement | null>(null);
 
-  const persistPinnedQuestions = (next: string[]) => {
-    setPinnedQuestions(next);
-    try {
-      globalThis.localStorage.setItem(PINNED_PROMPTS_STORAGE_KEY, JSON.stringify(next));
-    } catch {
-      // Ignore storage failures.
-    }
-  };
+
+  useEffect(() => {
+    scrollAnchorRef.current?.scrollIntoView({ block: 'end' });
+  }, [history, loading, drawerOpen, expandedSqlIds]);
 
   const runPrompt = async (prompt: string) => {
-    if (!prompt.trim()) {
+    const cleanPrompt = prompt.trim();
+    if (!cleanPrompt) {
       return;
     }
 
     setLoading(true);
+    setPendingQuestion(cleanPrompt);
+    setDrawerOpen(true);
+
     try {
-      const response = await runQuestion(prompt.trim());
-      setQuestion(prompt);
-      setResult(response);
-      setActiveSection('results');
-      onQueryResult?.(prompt.trim(), response);
+      const response = await runQuestion(cleanPrompt);
+      const exchange = { id: buildExchangeId(), question: cleanPrompt, response };
+      setHistory((previous) => [...previous, exchange]);
+      setHighlightedExchangeId(exchange.id);
+      onQueryResult?.(cleanPrompt, response);
+    } catch (error) {
+      const response: QueryResponse = {
+        ok: false,
+        error: error instanceof Error ? error.message : 'Query failed unexpectedly.',
+        sql: '',
+        rows: [],
+      };
+      const exchange = { id: buildExchangeId(), question: cleanPrompt, response };
+      setHistory((previous) => [...previous, exchange]);
+      setHighlightedExchangeId(exchange.id);
+      onQueryResult?.(cleanPrompt, response);
     } finally {
+      setQuestion('');
+      setPendingQuestion(null);
       setLoading(false);
     }
   };
@@ -302,29 +219,6 @@ export function ChatPanel({ onQueryResult }: Readonly<ChatPanelProps>) {
     await runPrompt(question);
   };
 
-  const togglePinnedQuestion = (prompt: string) => {
-    const cleanPrompt = prompt.trim();
-    if (!cleanPrompt) {
-      return;
-    }
-
-    const next = pinnedQuestions.includes(cleanPrompt)
-      ? pinnedQuestions.filter((entry) => entry !== cleanPrompt)
-      : [...pinnedQuestions, cleanPrompt];
-
-    persistPinnedQuestions(next);
-    setShowSuggestions(false);
-  };
-
-  const pinCurrentQuestion = () => {
-    const cleanPrompt = question.trim();
-    if (!cleanPrompt || pinnedQuestions.includes(cleanPrompt)) {
-      return;
-    }
-
-    persistPinnedQuestions([...pinnedQuestions, cleanPrompt]);
-  };
-
   const onQuestionKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
       event.preventDefault();
@@ -332,135 +226,177 @@ export function ChatPanel({ onQueryResult }: Readonly<ChatPanelProps>) {
     }
   };
 
-  const onSelectExample = (example: string) => {
-    setQuestion(example);
-    setShowSuggestions(false);
+  const toggleSql = (exchangeId: string) => {
+    setExpandedSqlIds((previous) =>
+      previous.includes(exchangeId) ? previous.filter((value) => value !== exchangeId) : [...previous, exchangeId],
+    );
   };
 
-  const clearAllPins = () => {
-    persistPinnedQuestions([]);
+  const toggleTableExpand = (tableId: string) => {
+    setExpandedTables((previous) => {
+      const next = new Set(previous);
+      if (next.has(tableId)) {
+        next.delete(tableId);
+      } else {
+        next.add(tableId);
+      }
+      return next;
+    });
   };
 
-  const onPinnedDragStart = (prompt: string) => {
-    setDraggedPinnedPrompt(prompt);
+  const handleTableSort = (tableId: string, column: string) => {
+    setTableSortState((previous) => {
+      if (previous.tableId === tableId && previous.column === column) {
+        return {
+          tableId,
+          column,
+          direction: previous.direction === 'asc' ? 'desc' : 'asc',
+        };
+      }
+      return { tableId, column, direction: 'asc' };
+    });
   };
 
-  const onPinnedDrop = (targetPrompt: string) => {
-    if (!draggedPinnedPrompt || draggedPinnedPrompt === targetPrompt) {
-      setDraggedPinnedPrompt(null);
-      return;
-    }
-
-    const fromIndex = pinnedQuestions.indexOf(draggedPinnedPrompt);
-    const toIndex = pinnedQuestions.indexOf(targetPrompt);
-    if (fromIndex < 0 || toIndex < 0) {
-      setDraggedPinnedPrompt(null);
-      return;
-    }
-
-    const reordered = [...pinnedQuestions];
-    const [moved] = reordered.splice(fromIndex, 1);
-    reordered.splice(toIndex, 0, moved);
-    persistPinnedQuestions(reordered);
-    setDraggedPinnedPrompt(null);
+  const highlightExchange = (exchange: ChatExchange) => {
+    setHighlightedExchangeId(exchange.id);
+    onQueryResult?.(exchange.question, exchange.response);
   };
 
-  const isCurrentQuestionPinned = pinnedQuestions.includes(question.trim());
+  const clearChat = () => {
+    setHistory([]);
+    setExpandedSqlIds([]);
+    setHighlightedExchangeId(null);
+    setPendingQuestion(null);
+    setExpandedTables(new Set());
+    setTableSortState({ tableId: '', column: null, direction: 'asc' });
+    onQueryResult?.('', { ok: true, sql: '', rows: [], answer: '' });
+  };
 
   return (
-    <section className="pane chat-pane">
-      <h2>Conversational Query</h2>
-      <p className="pane-intro">Ask a business question or start from one of the guided investigation prompts.</p>
+    <>
+      {drawerOpen ? null : (
+        <button
+          type="button"
+          className="chat-drawer-toggle"
+          onClick={() => setDrawerOpen(true)}
+          aria-expanded={drawerOpen}
+          aria-controls="dodge-ai-chat-drawer"
+        >
+          Ask Dodge AI
+        </button>
+      )}
 
-      {pinnedQuestions.length > 0 ? (
-        <div className="quick-run-bar">
-          <div className="quick-run-head">
-            <p className="quick-run-label">Pinned Quick Runs</p>
-            <button type="button" className="quick-run-clear" onClick={clearAllPins}>
-              Clear all
+      <aside id="dodge-ai-chat-drawer" className={`chat-drawer${drawerOpen ? ' is-open' : ''}`} aria-label="Dodge AI chat">
+        <div className="chat-drawer-header">
+          <div>
+            <h2>Dodge AI</h2>
+          </div>
+          <div className="chat-drawer-header-actions">
+            <button type="button" className="chat-drawer-clear" onClick={clearChat} disabled={history.length === 0}>
+              Clear chat
+            </button>
+            <button type="button" className="chat-drawer-close" onClick={() => setDrawerOpen(false)}>
+              Close
             </button>
           </div>
-          <div className="quick-run-list">
-            {pinnedQuestions.map((prompt) => (
-              <button
-                key={prompt}
-                type="button"
-                className={`quick-run-chip${draggedPinnedPrompt === prompt ? ' is-dragging' : ''}`}
-                draggable
-                onDragStart={() => onPinnedDragStart(prompt)}
-                onDragOver={(event) => event.preventDefault()}
-                onDrop={() => onPinnedDrop(prompt)}
-                onDragEnd={() => setDraggedPinnedPrompt(null)}
-                title="Drag to reorder"
-                onClick={() => runPrompt(prompt)}
-                disabled={loading}
-              >
-                <span className="quick-run-drag-dots" aria-hidden="true">••</span>
-                {prompt}
+        </div>
+
+        <div className="chat-drawer-body">
+          {history.length === 0 && !loading ? (
+            <div className="chat-empty-state">
+              <p className="chat-empty-title">Ask a dataset question to start the session.</p>
+              <p className="chat-empty-copy">Conversations stay only for this browser session and disappear when the session ends.</p>
+            </div>
+          ) : null}
+
+          {history.map((exchange) => {
+            const rows = exchange.response.rows ?? [];
+            const showSql = expandedSqlIds.includes(exchange.id);
+            return (
+              <div key={exchange.id} className="chat-exchange">
+                <article className="chat-bubble chat-bubble-user">
+                  <p>{exchange.question}</p>
+                </article>
+                <article className="chat-bubble chat-bubble-assistant">
+                  {exchange.response.ok ? (
+                    <p className="answer-copy answer-copy-compact">{exchange.response.answer}</p>
+                  ) : (
+                    <p className="error">{exchange.response.error}</p>
+                  )}
+                  <div className="chat-response-meta">
+                    <span>{rows.length} row{rows.length === 1 ? '' : 's'}</span>
+                    <button
+                      type="button"
+                      className={`chat-highlight-btn${highlightedExchangeId === exchange.id ? ' is-active' : ''}`}
+                      onClick={() => highlightExchange(exchange)}
+                    >
+                      {highlightedExchangeId === exchange.id ? 'Highlighted' : 'Highlight'}
+                    </button>
+                  </div>
+                  {rows.length > 0 ? (
+                    <ResultTable
+                      rows={rows}
+                      totalRows={rows.length}
+                      tableId={exchange.id}
+                      expandedTables={expandedTables}
+                      onToggleExpand={toggleTableExpand}
+                      sortColumn={tableSortState.tableId === exchange.id ? tableSortState.column : null}
+                      sortDirection={tableSortState.tableId === exchange.id ? tableSortState.direction : 'asc'}
+                      onSort={(column) => handleTableSort(exchange.id, column)}
+                    />
+                  ) : null}
+                  {exchange.response.sql ? (
+                    <div className="chat-inline-sql">
+                      <button type="button" className="chat-inline-sql-toggle" onClick={() => toggleSql(exchange.id)}>
+                        {showSql ? 'Hide SQL' : 'Show SQL'}
+                      </button>
+                      {showSql ? <SqlPanel sql={exchange.response.sql} /> : null}
+                    </div>
+                  ) : null}
+                </article>
+              </div>
+            );
+          })}
+
+          {loading && pendingQuestion ? (
+            <div className="chat-exchange">
+              <article className="chat-bubble chat-bubble-user">
+                <p>{pendingQuestion}</p>
+              </article>
+              <article className="chat-bubble chat-bubble-assistant chat-bubble-loading">
+                <p>Running the query and matching evidence in the graph...</p>
+              </article>
+            </div>
+          ) : null}
+          <div ref={scrollAnchorRef} />
+        </div>
+
+        <div className="chat-drawer-footer">
+          <div className="chat-example-row">
+            {EXAMPLES.map((example) => (
+              <button key={example} type="button" className="example-chip" onClick={() => runPrompt(example)} disabled={loading}>
+                {example}
               </button>
             ))}
           </div>
+
+          <form onSubmit={onSubmit} className="chat-form chat-form-overlay">
+            <textarea
+              value={question}
+              onChange={(event) => setQuestion(event.target.value)}
+              onKeyDown={onQuestionKeyDown}
+              placeholder="Ask about products, billing documents, document flow, broken orders..."
+              rows={3}
+            />
+            <div className="chat-actions">
+              <span className="chat-hint">Ctrl+Enter to send</span>
+              <button type="submit" disabled={loading || !question.trim()}>
+                {loading ? 'Running...' : 'Send'}
+              </button>
+            </div>
+          </form>
         </div>
-      ) : null}
-
-      <form onSubmit={onSubmit} className="chat-form">
-        <textarea
-          value={question}
-          onChange={(e) => setQuestion(e.target.value)}
-          onKeyDown={onQuestionKeyDown}
-          placeholder="Ask a dataset question..."
-          rows={4}
-        />
-        <div className="chat-actions">
-          <button type="submit" disabled={loading}>
-            {loading ? 'Running...' : 'Ask'}
-          </button>
-          <button
-            type="button"
-            className="chat-pin-current"
-            onClick={pinCurrentQuestion}
-            disabled={!question.trim() || isCurrentQuestionPinned}
-            title="Pin current input to quick runs"
-          >
-            {isCurrentQuestionPinned ? 'Pinned' : 'Pin current'}
-          </button>
-        </div>
-      </form>
-
-      <div className="examples-collapsible">
-        <button
-          type="button"
-          className="examples-toggle"
-          onClick={() => setShowSuggestions((previous) => !previous)}
-          aria-expanded={showSuggestions}
-        >
-          Suggested questions {showSuggestions ? '▲' : '▼'}
-        </button>
-        {showSuggestions ? (
-          <div className="examples">
-            {EXAMPLES.map((example) => {
-              const isPinned = pinnedQuestions.includes(example);
-              return (
-                <div key={example} className="example-card">
-                  <button type="button" className="example-chip" onClick={() => onSelectExample(example)}>
-                    {example}
-                  </button>
-                  <button
-                    type="button"
-                    className={`example-pin${isPinned ? ' is-pinned' : ''}`}
-                    onClick={() => togglePinnedQuestion(example)}
-                    title={isPinned ? 'Unpin question' : 'Pin to quick runs'}
-                  >
-                    {isPinned ? 'Unpin' : 'Pin'}
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        ) : null}
-      </div>
-
-      {result ? <ResultWorkspace result={result} activeSection={activeSection} onSelectSection={setActiveSection} /> : null}
-    </section>
+      </aside>
+    </>
   );
 }

@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from .database import ensure_internal_tables, list_tables
-from .graph_service import infer_graph_edges, list_graph_nodes
+from .graph_service import infer_graph_edges, list_graph_nodes, prioritize_connected_view
 from .guardrails import is_domain_question
 from .ingest import integrity_snapshot, load_csv_folder
 from .logging_config import setup_logging
@@ -69,7 +69,20 @@ def ingest(req: IngestRequest) -> dict:
 
 
 @app.get("/api/graph")
-def graph(limit_per_table: int = 25) -> dict:
+def graph(limit_per_table: int = 22, mode: str = "fast") -> dict:
+    """
+    Fetch the graph with edge-first construction.
+    
+    The new strategy prioritizes connected nodes:
+    1. Fetches edges (determines which records are connected)
+    2. Extracts all node IDs from those edges
+    3. Fetches those nodes from the database
+    4. Supplements with sample isolated nodes for coverage
+    
+    This results in a much more connected graph with minimal isolated nodes.
+    Default limit_per_table=22 prioritizes faster loading while preserving
+    the key O2C structure and cross-entity transparency.
+    """
     logger.info("graph_request limit_per_table=%d", limit_per_table)
     nodes = list_graph_nodes(limit_per_table=limit_per_table)
     edges = infer_graph_edges(limit_per_table=max(limit_per_table, 100))
@@ -79,8 +92,17 @@ def graph(limit_per_table: int = 25) -> dict:
         for edge in edges["edges"]
         if edge["source"] in node_ids and edge["target"] in node_ids
     ]
-    logger.info("graph_response nodes=%d edges=%d", len(nodes["nodes"]), len(filtered_edges))
-    return {"nodes": nodes["nodes"], "edges": filtered_edges}
+    if mode == "full":
+        logger.info("graph_response mode=full nodes=%d edges=%d", len(nodes["nodes"]), len(filtered_edges))
+        return {"nodes": nodes["nodes"], "edges": filtered_edges}
+
+    prioritized_nodes, prioritized_edges = prioritize_connected_view(
+        nodes["nodes"],
+        filtered_edges,
+        samples_per_table=1,
+    )
+    logger.info("graph_response mode=fast nodes=%d edges=%d", len(prioritized_nodes), len(prioritized_edges))
+    return {"nodes": prioritized_nodes, "edges": prioritized_edges}
 
 
 @app.post("/api/chat/query")

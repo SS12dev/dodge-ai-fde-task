@@ -336,6 +336,42 @@ class QueryService:
             return f"Found {len(rows)} sales order(s) with an incomplete O2C flow."
         return f"Dataset query returned {len(rows)} record(s)."
 
+    def _rewrite_answer_with_llm(self, question: str, rows: list[dict], base_answer: str) -> str:
+        if not rows or not self.model_candidates:
+            return base_answer
+
+        sample_rows = rows[:3]
+        prompt = dedent(
+            f"""
+            You are an ERP analyst assistant. Rewrite the answer in one or two short sentences.
+            Keep it clear and natural for a business analyst.
+            Do not invent facts. Use only the provided row count and sample rows.
+            Mention the row count once. If useful, mention one notable top result.
+            Avoid technical wording like "record(s)" unless necessary.
+
+            Question: {question}
+            Existing answer: {base_answer}
+            Row count: {len(rows)}
+            Sample rows: {sample_rows}
+
+            Return only the rewritten answer text.
+            """
+        ).strip()
+
+        for candidate in self.model_candidates:
+            try:
+                model = self._get_model(candidate)
+                response = model.generate_content(prompt)
+                rewritten = (response.text or "").strip()
+                if rewritten:
+                    self.model_name = candidate
+                    logger.info("answer_rewrite_success model=%s", candidate)
+                    return rewritten
+            except Exception as exc:
+                logger.warning("answer_rewrite_failed model=%s error=%s", candidate, exc)
+
+        return base_answer
+
     def ask(self, question: str) -> dict:
         sql, allowed_tables, generation_source, model_name = self.generate_sql(question)
         ok, checked = validate_sql_read_only(sql, allowed_tables)
@@ -354,11 +390,13 @@ class QueryService:
         try:
             rows = self.run_query(checked)
             logger.info("sql_query_executed rows=%d", len(rows))
+            base_answer = self._build_answer(question, rows)
+            answer = self._rewrite_answer_with_llm(question, rows, base_answer)
             return {
                 "ok": True,
                 "sql": checked,
                 "rows": rows,
-                "answer": self._build_answer(question, rows),
+                "answer": answer,
                 "generation_source": generation_source,
                 "model_name": model_name,
             }
@@ -372,11 +410,13 @@ class QueryService:
                 try:
                     fb_rows = self.run_query(fb_checked)
                     logger.info("sql_query_fallback_executed rows=%d", len(fb_rows))
+                    base_answer = self._build_answer(question, fb_rows)
+                    answer = self._rewrite_answer_with_llm(question, fb_rows, base_answer)
                     return {
                         "ok": True,
                         "sql": fb_checked,
                         "rows": fb_rows,
-                        "answer": self._build_answer(question, fb_rows),
+                        "answer": answer,
                         "generation_source": "deterministic-fallback",
                         "model_name": None,
                     }

@@ -1,53 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ChatPanel } from './components/ChatPanel';
 import { GraphView } from './components/GraphView';
-import { fetchGraph, ingestData } from './lib/api';
+import { fetchGraph, type GraphMode, ingestData } from './lib/api';
 import type { GraphData, QueryResponse } from './lib/types';
 import './App.css';
-
-type HeaderSummaryProps = {
-  status: string;
-  nodeCount: number;
-  edgeCount: number;
-  graphSummary: Array<[string, number]>;
-};
-
-function HeaderIntro() {
-  return (
-    <section className="top-panel top-panel-intro">
-      <p className="eyebrow">Analyst Workbench</p>
-      <h1>Dodge AI O2C Context Graph</h1>
-      <p className="header-description">
-        Investigate document flow, inspect connected ERP entities, and run grounded natural-language
-        questions against the SAP order-to-cash dataset.
-      </p>
-    </section>
-  );
-}
-
-function HeaderSummary({ status, nodeCount, edgeCount, graphSummary }: Readonly<HeaderSummaryProps>) {
-  return (
-    <section className="top-panel top-panel-status">
-      <p className="status-pill">{status}</p>
-      <div className="summary-grid">
-        <article>
-          <span className="summary-label">Entities</span>
-          <strong>{nodeCount}</strong>
-        </article>
-        <article>
-          <span className="summary-label">Relationships</span>
-          <strong>{edgeCount}</strong>
-        </article>
-        {graphSummary.map(([table, count]) => (
-          <article key={table}>
-            <span className="summary-label">{table}</span>
-            <strong>{count}</strong>
-          </article>
-        ))}
-      </div>
-    </section>
-  );
-}
 
 function normalizeToken(value: string): string {
   return value.trim().toLowerCase();
@@ -150,47 +106,42 @@ function deriveMatchedNodes(graph: GraphData, response: QueryResponse): string[]
 
 function App() {
   const [graph, setGraph] = useState<GraphData>({ nodes: [], edges: [] });
-  const [status, setStatus] = useState<string>('Loading graph...');
+  const [graphMode, setGraphMode] = useState<GraphMode>('fast');
+  const [graphLoading, setGraphLoading] = useState(true);
   const [queryMatchedNodeIds, setQueryMatchedNodeIds] = useState<string[]>([]);
-  const bootstrapped = useRef(false);
 
   useEffect(() => {
-    if (bootstrapped.current) {
-      return;
-    }
-    bootstrapped.current = true;
-
     const bootstrap = async () => {
-      let ingestWarning = false;
+      setGraphLoading(true);
       try {
-        await ingestData();
-      } catch (err) {
-        ingestWarning = true;
-        console.warn('Dataset ingest on startup failed; attempting to load existing graph.', err);
-      }
+        try {
+          const nextGraph = await fetchGraph(graphMode);
+          if (nextGraph.nodes.length > 0) {
+            setGraph(nextGraph);
+            return;
+          }
+        } catch (err) {
+          console.warn('Graph not available yet; running ingest fallback.', err);
+        }
 
-      try {
-        const nextGraph = await fetchGraph();
+        await ingestData();
+        const nextGraph = await fetchGraph(graphMode);
         setGraph(nextGraph);
-        const prefix = ingestWarning ? 'Loaded existing graph after ingest warning.' : 'Loaded';
-        setStatus(`${prefix} ${nextGraph.nodes.length} nodes and ${nextGraph.edges.length} edges`);
       } catch (err) {
-        setStatus('Graph load failed. Make sure backend is running and dataset files are available in /data.');
-        console.error(err);
+        console.error('Failed to bootstrap graph.', err);
+      } finally {
+        setGraphLoading(false);
       }
     };
     bootstrap();
-  }, []);
+  }, [graphMode]);
 
-  const graphSummary = useMemo(() => {
-    const byTable = new Map<string, number>();
-    for (const node of graph.nodes) {
-      byTable.set(node.table, (byTable.get(node.table) ?? 0) + 1);
+  const onGraphModeChange = (mode: GraphMode) => {
+    if (mode === graphMode) {
+      return;
     }
-    return [...byTable.entries()]
-      .sort((left, right) => right[1] - left[1])
-      .slice(0, 4);
-  }, [graph]);
+    setGraphMode(mode);
+  };
 
   const handleQueryResult = (_question: string, response: QueryResponse) => {
     const matched = deriveMatchedNodes(graph, response);
@@ -198,20 +149,15 @@ function App() {
   };
 
   return (
-    <main className="layout">
-      <section className="top-strip">
-        <HeaderIntro />
-        <HeaderSummary
-          status={status}
-          nodeCount={graph.nodes.length}
-          edgeCount={graph.edges.length}
-          graphSummary={graphSummary}
-        />
-      </section>
-      <section className="panes">
-        <GraphView graph={graph} queryMatchedNodeIds={queryMatchedNodeIds} />
-        <ChatPanel onQueryResult={handleQueryResult} />
-      </section>
+    <main className="app-shell">
+      <GraphView
+        graph={graph}
+        queryMatchedNodeIds={queryMatchedNodeIds}
+        graphMode={graphMode}
+        isGraphLoading={graphLoading}
+        onGraphModeChange={onGraphModeChange}
+      />
+      <ChatPanel onQueryResult={handleQueryResult} />
     </main>
   );
 }

@@ -14,6 +14,7 @@ export type HoveredNode = {
 export type LegendItem = {
   table: string;
   colour: string;
+  stage: BusinessStage;
 };
 
 type UseGraphInteractionsResult = {
@@ -36,7 +37,61 @@ type UseGraphInteractionsResult = {
 const RESET_CLASSES =
   'selected neighbor faded hovered neighbor-pulse query-match query-path query-muted query-evidence-flash legend-match legend-muted';
 
+type BusinessStage = 'Orders' | 'Delivery' | 'Billing' | 'Finance' | 'Other';
+
+const STAGE_BASE_COLOURS: Record<BusinessStage, string> = {
+  Orders: '#4f83c2',
+  Delivery: '#49a487',
+  Billing: '#c99054',
+  Finance: '#8b79be',
+  Other: '#6e7e95',
+};
+
+const STAGE_EDGE_COLOURS: Record<BusinessStage, string> = {
+  Orders: '#6e98c7',
+  Delivery: '#66b79e',
+  Billing: '#d5a879',
+  Finance: '#a794d2',
+  Other: '#8695ac',
+};
+
+function inferBusinessStage(table: string): BusinessStage {
+  if (table.startsWith('sales_order') || table === 'products' || table === 'business_partners') {
+    return 'Orders';
+  }
+  if (table.startsWith('outbound_delivery')) {
+    return 'Delivery';
+  }
+  if (table.startsWith('billing_document')) {
+    return 'Billing';
+  }
+  if (table.startsWith('journal_entry') || table.startsWith('payments')) {
+    return 'Finance';
+  }
+  return 'Other';
+}
+
+function tintHex(hex: string, amount: number): string {
+  const value = hex.replace('#', '');
+  const red = Math.max(0, Math.min(255, Number.parseInt(value.slice(0, 2), 16) + amount));
+  const green = Math.max(0, Math.min(255, Number.parseInt(value.slice(2, 4), 16) + amount));
+  const blue = Math.max(0, Math.min(255, Number.parseInt(value.slice(4, 6), 16) + amount));
+  return `#${red.toString(16).padStart(2, '0')}${green.toString(16).padStart(2, '0')}${blue.toString(16).padStart(2, '0')}`;
+}
+
+function colourForTable(table: string): string {
+  const base = STAGE_BASE_COLOURS[inferBusinessStage(table)];
+  let hash = 0;
+  for (let index = 0; index < table.length; index += 1) {
+    hash = (hash * 31 + (table.codePointAt(index) ?? 0)) >>> 0;
+  }
+  const variation = (hash % 3 - 1) * 10;
+  return tintHex(base, variation);
+}
+
 function buildElements(graph: GraphData): cytoscape.ElementDefinition[] {
+  const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
+
   return [
     ...graph.nodes.map((node) => ({
       classes: `table-${node.table.toLowerCase().replaceAll(/[^a-z0-9]+/g, '-')}`,
@@ -44,17 +99,23 @@ function buildElements(graph: GraphData): cytoscape.ElementDefinition[] {
         id: node.id,
         label: node.label,
         table: node.table,
-        colour: node.colour ?? '#005f73',
+        colour: colourForTable(node.table),
+        stage: inferBusinessStage(node.table),
       },
     })),
-    ...graph.edges.map((edge) => ({
-      data: {
-        id: edge.id,
-        source: edge.source,
-        target: edge.target,
-        label: edge.label,
-      },
-    })),
+    ...graph.edges.map((edge) => {
+      const sourceTable = nodeById.get(edge.source)?.table ?? '';
+      const edgeStage = inferBusinessStage(sourceTable);
+      return {
+        data: {
+          id: edge.id,
+          source: edge.source,
+          target: edge.target,
+          label: edge.label,
+          edgeColour: STAGE_EDGE_COLOURS[edgeStage],
+        },
+      };
+    }),
   ];
 }
 
@@ -64,18 +125,19 @@ const CYTOSCAPE_STYLE = [
     style: {
       label: 'data(label)',
       'background-color': 'data(colour)',
-      color: '#f8fafc',
-      'font-size': '10px',
+      color: '#e7eef7',
+      'font-size': '8px',
       'font-weight': 600,
       'text-wrap': 'ellipsis',
-      'text-max-width': '110px',
-      'text-outline-width': 2,
-      'text-outline-color': '#16313c',
-      'min-zoomed-font-size': 9,
-      width: 26,
-      height: 26,
+      'text-max-width': '96px',
+      'text-outline-width': 1,
+      'text-outline-color': '#1a2a3b',
+      'min-zoomed-font-size': 12,
+      width: 24,
+      height: 24,
       'border-width': 1,
-      'border-color': '#d8ece6',
+      'border-color': '#90a7bf',
+      'text-opacity': 0.35,
       'overlay-opacity': 0,
       'transition-property': 'background-color, border-color, border-width, width, height, opacity',
       'transition-duration': 200,
@@ -85,29 +147,31 @@ const CYTOSCAPE_STYLE = [
     selector: 'node.selected',
     style: {
       'border-width': 4,
-      'border-color': '#f3a712',
-      width: 34,
-      height: 34,
-      'underlay-color': '#f3a712',
-      'underlay-opacity': 0.18,
+      'border-color': '#63b4ff',
+      width: 32,
+      height: 32,
+      'underlay-color': '#63b4ff',
+      'underlay-opacity': 0.2,
       'underlay-padding': 8,
+      'text-opacity': 1,
     },
   },
   {
     selector: 'node.hovered',
     style: {
       'border-width': 3,
-      'border-color': '#ffd166',
-      'underlay-color': '#ffd166',
-      'underlay-opacity': 0.12,
+      'border-color': '#7dc3ff',
+      'underlay-color': '#7dc3ff',
+      'underlay-opacity': 0.14,
       'underlay-padding': 6,
+      'text-opacity': 1,
     },
   },
   {
     selector: 'node.neighbor-pulse',
     style: {
-      'underlay-color': '#8ecae6',
-      'underlay-opacity': 0.24,
+      'underlay-color': '#7bb8ff',
+      'underlay-opacity': 0.22,
       'underlay-padding': 10,
     },
   },
@@ -115,19 +179,20 @@ const CYTOSCAPE_STYLE = [
     selector: 'node.query-match',
     style: {
       'border-width': 4,
-      'border-color': '#ff9f1c',
-      'underlay-color': '#ff9f1c',
+      'border-color': '#ffd06a',
+      'underlay-color': '#ffd06a',
       'underlay-opacity': 0.24,
       'underlay-padding': 9,
+      'text-opacity': 1,
     },
   },
   {
     selector: 'node.query-evidence-flash',
     style: {
       'border-width': 5,
-      'border-color': '#ffe066',
-      'underlay-color': '#ffe066',
-      'underlay-opacity': 0.44,
+      'border-color': '#ffe5a0',
+      'underlay-color': '#ffe5a0',
+      'underlay-opacity': 0.36,
       'underlay-padding': 14,
     },
   },
@@ -135,10 +200,11 @@ const CYTOSCAPE_STYLE = [
     selector: 'node.legend-match',
     style: {
       'border-width': 4,
-      'border-color': '#2a9d8f',
-      'underlay-color': '#2a9d8f',
-      'underlay-opacity': 0.25,
+      'border-color': '#71b8ff',
+      'underlay-color': '#71b8ff',
+      'underlay-opacity': 0.22,
       'underlay-padding': 10,
+      'text-opacity': 1,
     },
   },
   {
@@ -167,22 +233,23 @@ const CYTOSCAPE_STYLE = [
     style: {
       opacity: 1,
       'border-width': 2,
-      'border-color': '#7bd389',
+      'border-color': '#9ed2ff',
+      'text-opacity': 1,
     },
   },
   {
     selector: 'edge',
     style: {
-      width: 2,
-      opacity: 0.45,
-      'line-color': '#8ecae6',
-      'target-arrow-color': '#8ecae6',
+      width: 1.6,
+      opacity: 0.4,
+      'line-color': 'data(edgeColour)',
+      'target-arrow-color': 'data(edgeColour)',
       'target-arrow-shape': 'triangle',
-      'arrow-scale': 0.8,
+      'arrow-scale': 0.7,
       label: 'data(label)',
       'font-size': '8px',
-      color: '#486571',
-      'text-background-color': '#f8fafc',
+      color: '#b5c5d8',
+      'text-background-color': '#1b2839',
       'text-background-opacity': 0,
       'text-background-padding': '2px',
       'min-zoomed-font-size': 10,
@@ -194,12 +261,12 @@ const CYTOSCAPE_STYLE = [
   {
     selector: 'edge.neighbor',
     style: {
-      opacity: 0.95,
-      width: 3,
-      'line-color': '#219ebc',
-      'target-arrow-color': '#219ebc',
+      opacity: 0.92,
+      width: 2.8,
+      'line-color': '#7fc2ff',
+      'target-arrow-color': '#7fc2ff',
       'text-opacity': 1,
-      'text-background-opacity': 0.85,
+      'text-background-opacity': 0.82,
     },
   },
   {
@@ -207,8 +274,8 @@ const CYTOSCAPE_STYLE = [
     style: {
       opacity: 0.9,
       width: 3,
-      'line-color': '#ff9f1c',
-      'target-arrow-color': '#ff9f1c',
+      'line-color': '#ffd06a',
+      'target-arrow-color': '#ffd06a',
       'text-opacity': 1,
       'text-background-opacity': 0.82,
     },
@@ -262,13 +329,20 @@ export function useGraphInteractions(graph: GraphData, queryMatchedNodeIds: stri
   const selectedNode = selectedNodeId ? (nodeById.get(selectedNodeId) ?? null) : null;
 
   const tableLegendItems = useMemo(() => {
-    const tableToColour = new Map<string, string>();
+    const tableToMeta = new Map<string, { colour: string; stage: BusinessStage }>();
     for (const node of graph.nodes) {
-      if (!tableToColour.has(node.table)) {
-        tableToColour.set(node.table, node.colour ?? '#005f73');
+      if (!tableToMeta.has(node.table)) {
+        tableToMeta.set(node.table, {
+          colour: colourForTable(node.table),
+          stage: inferBusinessStage(node.table),
+        });
       }
     }
-    return Array.from(tableToColour.entries()).map(([table, colour]) => ({ table, colour }));
+    return Array.from(tableToMeta.entries()).map(([table, meta]) => ({
+      table,
+      colour: meta.colour,
+      stage: meta.stage,
+    }));
   }, [graph.nodes]);
 
   const clearGraphFocus = (shouldFit: boolean) => {
@@ -314,16 +388,16 @@ export function useGraphInteractions(graph: GraphData, queryMatchedNodeIds: stri
       layout: {
         name: 'cose',
         animate: false,
-        randomize: true,
+        randomize: false,
         fit: true,
         padding: 50,
-        nodeRepulsion: () => 10000,
-        idealEdgeLength: () => 120,
-        edgeElasticity: () => 90,
-        componentSpacing: 100,
+        nodeRepulsion: () => 22000,
+        idealEdgeLength: () => 165,
+        edgeElasticity: () => 70,
+        componentSpacing: 170,
         nestingFactor: 1.1,
-        gravity: 0.9,
-        numIter: 1200,
+        gravity: 0.45,
+        numIter: 700,
       },
       minZoom: 0.08,
       maxZoom: 2.2,

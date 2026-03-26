@@ -1,9 +1,9 @@
 :root {
-  font-family: 'Segoe UI', Tahoma, sans-serif;
+  font-family: 'Avenir Next', 'Segoe UI', sans-serif;
   line-height: 1.4;
   font-weight: 400;
-  color: #122026;
-  background-color: #f1f5f3;
+  color: #d6e4f2;
+  background-color: #111b2a;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -16,6 +16,12 @@
 
 body {
   margin: 0;
+}
+
+html,
+body,
+#root {
+  height: 100%;
 }
 
 h1,
