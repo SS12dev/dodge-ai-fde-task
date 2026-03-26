@@ -64,7 +64,7 @@ The graph is a projection of the relational data, not an independently managed g
 
 Natural-language questions are translated into structured queries that are visible to the user. Reviewers should be able to inspect generated SQL and compare it against returned rows.
 
-The system should also expose the query handling path for debugging and reviewer trust, for example whether a response came from deterministic routing or Gemini generation.
+The system should preserve trust through SQL visibility and dataset-backed rows, regardless of whether execution was deterministic or Gemini-generated.
 
 ### Governed Hybrid Query Engine
 
@@ -101,9 +101,13 @@ The expected UI structure is:
 3. Query composer pane
 4. Results section with:
    - natural-language answer
-   - query handling mode
    - generated SQL
    - tabular records
+
+The graph explorer also supports a reviewer-facing **Fast/Full** mode toggle:
+
+- Fast mode for responsive connected-view exploration
+- Full mode for unfiltered graph visibility
 
 ## Reliability Expectations
 

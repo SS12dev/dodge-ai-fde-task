@@ -68,7 +68,7 @@ For production-style reliability, the system may use deterministic routing for v
 
 1. real SQL is executed against the dataset
 2. broader domain-valid questions still use dynamic generation
-3. the handling mode is transparent to reviewers and users
+3. generated SQL and result evidence remain transparent to reviewers and users
 
 ### 4. Required Query Classes
 
@@ -111,10 +111,9 @@ The MVP is considered complete when all of the following are true:
 4. A user can reveal or expand related entities from a selected node.
 5. The required query classes return real, dataset-grounded results.
 6. The generated SQL is visible for transparency.
-7. The query handling mode is visible for reviewer trust and debugging.
-8. Off-domain prompts are rejected cleanly.
-9. The project has a public repo, setup instructions, and demo-ready deployment path.
-10. AI coding session logs are preserved in sessions.
+7. Off-domain prompts are rejected cleanly.
+8. The project has a public repo, setup instructions, and demo-ready deployment path.
+9. AI coding session logs are preserved in sessions.
 
 ## Delivery Checklist
 

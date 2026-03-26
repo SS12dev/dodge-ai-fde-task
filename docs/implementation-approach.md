@@ -41,9 +41,9 @@ Focus:
 - node metadata inspection
 - simple neighbor expansion or reveal behavior
 - query input with guided examples
-- query mode visibility for deterministic versus Gemini handling
 - readable results table
 - generated SQL visibility
+- fast/full graph mode toggle for performance versus full transparency
 
 Exit criteria:
 
@@ -77,7 +77,6 @@ Exit criteria:
 - governed hybrid query routing
 - off-domain guardrails
 - graph inspection
-- routing visibility in the UI
 - result table and SQL transparency
 - public deployment path
 
@@ -105,8 +104,9 @@ The intended reviewer demo should be:
 4. Ask one trace question for a document flow.
 5. Ask one broken-flow question.
 6. Show one broader Gemini-routed analyst question.
-7. Show generated SQL, query mode, and resulting records.
-8. Show an off-domain prompt being rejected.
+7. Show generated SQL and resulting records.
+8. Toggle graph between Fast and Full modes to demonstrate performance and transparency tradeoff.
+9. Show an off-domain prompt being rejected.
 
 ## Definition of Done
 

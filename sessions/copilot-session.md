@@ -1,6 +1,6 @@
 # AI Coding Session Log — GitHub Copilot (VS Code)
 
-**Tool:** GitHub Copilot (Agent mode, Claude Sonnet 4.6)  
+**Tool:** GitHub Copilot (VS Code Agent mode; multi-session, multi-model usage)  
 **Date:** 2026-03-25  
 **Project:** Dodge AI FDE Task — Context Graph & NL Query System
 
@@ -217,6 +217,45 @@ Invoke-RestMethod -Uri "https://dodge-ai-backend-fcs8.onrender.com/api/ingest/lo
 
 **Prompt:**
 > "now lets deploy the frontend"
+
+---
+
+## Phase 8 — Submission Hardening and Reviewer UX (2026-03-26)
+
+**Tool:** GitHub Copilot (VS Code Agent, GPT-5.3-Codex)
+
+### Objectives
+
+1. improve graph responsiveness for live demo reliability
+2. preserve transparency while reducing visual fragmentation
+3. align documentation and deployment config for final submission
+
+### Key implementation iterations
+
+1. Added table sorting and expand/collapse in chat result tables.
+2. Introduced stage-aware graph legend grouping and improved dark-theme graph colors.
+3. Added chat reset controls and removed cross-refresh chat persistence.
+4. Added centered graph loading overlay to avoid blank-screen ambiguity during layout.
+5. Optimized graph startup by fetching existing graph first and using ingest only as fallback.
+6. Reduced frontend graph render pressure by lowering payload size and Cytoscape layout cost.
+7. Diagnosed graph segmentation from aggressive payload capping and added connectivity prioritization.
+8. Added **Fast/Full graph mode toggle**:
+  - Fast: connected, reviewer-friendly low-latency view
+  - Full: unfiltered view for maximum transparency
+9. Updated README, lock docs, and render config to match current behavior and deployment URLs.
+
+### Debugging pattern used
+
+1. quantify before change (component counts, nodes/edges, endpoint timing)
+2. patch smallest possible code paths
+3. re-run compile/build checks after every change set
+4. validate API behavior with explicit fast/full payload checks
+
+### Final reviewer-facing outcome
+
+1. required query workflows remain data-grounded and guardrailed
+2. graph is demo-safe under Fast mode and auditable under Full mode
+3. submission artifacts (README/docs/sessions/deploy config) are synchronized
 
 **Render Static Site settings:**
 - Root Directory: `src/frontend`

@@ -60,7 +60,16 @@ The system uses a **governed hybrid query architecture**.
 2. For broader domain-valid analyst questions, the backend uses Gemini with schema-aware prompting.
 3. If a preferred Gemini model is rate-limited or unavailable, the backend retries alternative free-tier models.
 4. All generated SQL is validated as read-only before execution.
-5. The UI surfaces the generated SQL and the query handling mode for transparency.
+5. The UI surfaces the generated SQL and tabular evidence for transparency.
+
+### Graph modes for demo clarity and transparency
+
+The graph viewer supports two reviewer-friendly modes:
+
+1. **Fast**: prioritizes a connected view for lower latency and smoother interaction.
+2. **Full**: returns the unfiltered graph payload for maximum visibility.
+
+This makes performance tradeoffs explicit without hiding source data from evaluation.
 
 The Gemini prompt is **schema-aware and few-shot**:
 
@@ -185,7 +194,9 @@ The frontend proxies `/api/*` to `http://localhost:8000` in dev mode — no CORS
 
 ### 6. Load data
 
-On first open, the UI calls `POST /api/ingest/load`, which reads JSONL entity folders from `data/sap-o2c-data/`, normalises column names, serializes nested fields, and populates `data/erp.db`.
+On startup, the UI first calls `GET /api/graph`.
+
+If graph data already exists, it loads immediately. If graph data is missing, the app falls back to `POST /api/ingest/load`, which reads JSONL entity folders from `data/sap-o2c-data/`, normalises column names, serializes nested fields, and populates `data/erp.db`.
 
 ---
 

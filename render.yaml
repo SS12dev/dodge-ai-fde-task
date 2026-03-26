@@ -14,7 +14,7 @@ services:
       - key: DATA_DIR
         value: /opt/render/project/src/data
       - key: CORS_ORIGINS
-        value: https://dodge-ai-frontend.onrender.com
+        value: https://dodge-ai-frontend-d1ee.onrender.com
 
   - type: web
     name: dodge-ai-frontend
@@ -24,4 +24,4 @@ services:
     staticPublishPath: dist
     envVars:
       - key: VITE_API_BASE_URL
-        value: https://dodge-ai-backend.onrender.com
+        value: https://dodge-ai-backend-fcs8.onrender.com
